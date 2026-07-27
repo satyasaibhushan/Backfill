@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Backfill
+WorkingDirectory=/srv/code/Backfill
 EnvironmentFile=%h/.config/backfill/backfill.env
-ExecStart=%h/Backfill/.venv/bin/backfill serve
+ExecStart=/srv/code/Backfill/.venv/bin/backfill serve
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20

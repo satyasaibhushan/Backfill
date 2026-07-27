@@ -19,8 +19,8 @@ only the exact value configured in `BACKFILL_ALLOWED_LOGIN`.
 Devbox requires Python 3.12 or newer, Git, Codex, Claude, and CodexBar.
 
 ```bash
-git clone git@github.com:satyasaibhushan/Backfill.git ~/Backfill
-cd ~/Backfill
+git clone git@github.com:satyasaibhushan/Backfill.git /srv/code/Backfill
+cd /srv/code/Backfill
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install .
@@ -40,7 +40,7 @@ consume.
 
 ```bash
 mkdir -p ~/.config/backfill
-cp ~/Backfill/deploy/backfill.env.example ~/.config/backfill/backfill.env
+cp /srv/code/Backfill/deploy/backfill.env.example ~/.config/backfill/backfill.env
 chmod 600 ~/.config/backfill/backfill.env
 ```
 
@@ -55,7 +55,7 @@ BACKFILL_ENABLE_CLAUDE_EXECUTION=false
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ~/Backfill/deploy/backfill.service ~/.config/systemd/user/
+cp /srv/code/Backfill/deploy/backfill.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now backfill.service
 ```
