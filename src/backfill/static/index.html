@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Backfill Control</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="paper-grain" aria-hidden="true"></div>
+    <div class="app-shell">
+      <header class="masthead">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Capacity dispatch / Devbox</p>
+            <h1>Backfill</h1>
+          </div>
+        </div>
+        <div class="masthead-actions">
+          <div class="owner-chip">
+            <span class="pulse-dot"></span>
+            <span id="owner-email">Authenticating…</span>
+          </div>
+          <button class="button button-primary" id="new-task-button">
+            <span>New job</span><kbd>N</kbd>
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="section-index">Control room / 01</p>
+            <h2>Use the gaps.<br /><em>Keep the reserve.</em></h2>
+          </div>
+          <div class="hero-copy">
+            <p>
+              Backfill fits the highest-value job into the provider window that can finish it
+              without consuming your protected headroom.
+            </p>
+            <div class="scheduler-strip">
+              <div>
+                <span class="label">Scheduler</span>
+                <strong id="scheduler-state">Inspecting</strong>
+              </div>
+              <div>
+                <span class="label">Active runs</span>
+                <strong id="running-count">—</strong>
+              </div>
+              <div class="scheduler-actions">
+                <button class="button button-ghost" id="pause-button">Pause</button>
+                <button class="button button-signal" id="tick-button">Dispatch now</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="providers-section">
+          <div class="section-heading">
+            <div>
+              <p class="section-index">Provider lines / 02</p>
+              <h3>Available headroom</h3>
+            </div>
+            <button class="text-button" id="refresh-providers">Refresh signals ↻</button>
+          </div>
+          <div class="provider-grid" id="provider-grid">
+            <div class="loading-card">Waiting for provider signals…</div>
+          </div>
+        </section>
+
+        <div class="operations-grid">
+          <section class="queue-section">
+            <div class="section-heading">
+              <div>
+                <p class="section-index">Priority ledger / 03</p>
+                <h3>The backlog</h3>
+              </div>
+              <span class="count-badge" id="queue-count">0 jobs</span>
+            </div>
+            <div class="task-list" id="task-list">
+              <div class="empty-state">
+                <span>∅</span>
+                <p>No work is waiting in the yard.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="runs-section">
+            <div class="section-heading">
+              <div>
+                <p class="section-index">Movement log / 04</p>
+                <h3>Recent runs</h3>
+              </div>
+            </div>
+            <div class="run-list" id="run-list">
+              <div class="empty-state compact">
+                <span>—</span>
+                <p>No runs recorded.</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer>
+        <span>Backfill Control v0.1</span>
+        <span class="footer-rule"></span>
+        <span>Loopback origin · identity-aware edge</span>
+      </footer>
+    </div>
+
+    <dialog id="task-dialog">
+      <form id="task-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-index">Add to priority ledger</p>
+            <h3>Define a job</h3>
+          </div>
+          <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
+        </div>
+
+        <label>
+          <span>Job title</span>
+          <input name="title" required minlength="3" maxlength="160" placeholder="Polish Shiplog setup flow" />
+        </label>
+
+        <label>
+          <span>Instructions</span>
+          <textarea
+            name="instructions"
+            required
+            minlength="10"
+            rows="5"
+            placeholder="Inspect the current setup flow, reproduce rough edges, and make the smallest cohesive improvement…"
+          ></textarea>
+        </label>
+
+        <label>
+          <span>Definition of done</span>
+          <textarea
+            name="definition_of_done"
+            required
+            minlength="3"
+            rows="3"
+            placeholder="Fresh install succeeds; existing tests pass; setup errors explain the next action."
+          ></textarea>
+        </label>
+
+        <div class="field-pair">
+          <label>
+            <span>Repository path on Devbox</span>
+            <input name="repo_path" required placeholder="/home/bhushan/Code/shiplog" />
+          </label>
+          <label>
+            <span>Branch name</span>
+            <input name="branch_name" placeholder="shiplog-setup-polish" />
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            <span>Priority</span>
+            <input name="priority" type="number" value="50" min="0" max="100" />
+          </label>
+          <label>
+            <span>Provider</span>
+            <select name="preferred_provider">
+              <option value="auto">Best fit</option>
+              <option value="codex">Codex</option>
+              <option value="claude">Claude</option>
+            </select>
+          </label>
+          <label>
+            <span>Estimated quota cost</span>
+            <div class="input-suffix">
+              <input name="estimated_cost_percent" type="number" value="10" min="1" max="100" />
+              <b>%</b>
+            </div>
+          </label>
+          <label>
+            <span>Runtime ceiling</span>
+            <div class="input-suffix">
+              <input name="max_runtime_minutes" type="number" value="60" min="5" max="720" />
+              <b>min</b>
+            </div>
+          </label>
+        </div>
+
+        <details>
+          <summary>Repository routing</summary>
+          <div class="field-pair inset-fields">
+            <label>
+              <span>Primary branch</span>
+              <input name="primary_branch" value="main" />
+            </label>
+            <label>
+              <span>Canonical remote</span>
+              <input name="upstream_remote" value="upstream" />
+            </label>
+          </div>
+        </details>
+
+        <div class="dialog-actions">
+          <button type="button" class="button button-ghost" data-close-dialog>Cancel</button>
+          <button class="button button-primary" type="submit">Add to backlog</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="run-dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="section-index">Run transcript</p>
+          <h3 id="run-dialog-title">Movement log</h3>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
+      </div>
+      <pre id="run-events">Loading…</pre>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
