@@ -30,11 +30,12 @@ Install CodexBar's Linux CLI from its official release tarball or Homebrew
 formula, then verify:
 
 ```bash
-codexbar usage --provider claude --source oauth --format json
+codexbar usage --provider claude --source cli --format json
 ```
 
-Codex and Claude must be signed in as the accounts whose capacity Backfill may
-consume.
+CodexBar's Claude probe deliberately reuses the working Claude CLI session
+instead of maintaining a separate web or OAuth credential. Codex and Claude
+must be signed in as the accounts whose capacity Backfill may consume.
 
 ## 2. Configure Backfill
 

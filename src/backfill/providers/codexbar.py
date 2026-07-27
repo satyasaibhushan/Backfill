@@ -29,7 +29,7 @@ class ClaudeCodexBarProvider:
                     "--provider",
                     "claude",
                     "--source",
-                    "oauth",
+                    "cli",
                     "--format",
                     "json",
                     stdin=asyncio.subprocess.DEVNULL,

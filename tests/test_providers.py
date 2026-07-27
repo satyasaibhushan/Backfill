@@ -9,6 +9,33 @@ from backfill.providers.models import ProviderSnapshot, UsageWindow
 from backfill.providers.service import ProviderService
 
 
+@pytest.mark.asyncio
+async def test_codexbar_uses_claude_cli_auth(settings, monkeypatch) -> None:
+    command: tuple[object, ...] = ()
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (
+                b'[{"provider":"claude","usage":{"primary":{"usedPercent":8}}}]',
+                b"",
+            )
+
+    async def create_process(*args, **_kwargs):
+        nonlocal command
+        command = args
+        return Process()
+
+    monkeypatch.setattr("shutil.which", lambda _command: "/usr/bin/codexbar")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", create_process)
+
+    snapshot = await ClaudeCodexBarProvider(settings).probe()
+
+    assert snapshot.ready is True
+    assert command[command.index("--source") + 1] == "cli"
+
+
 def test_codex_rate_limit_response_is_normalized(settings) -> None:
     provider = CodexProvider(settings)
 
@@ -63,7 +90,7 @@ def test_codexbar_claude_response_is_normalized(settings) -> None:
     snapshot = provider._parse(
         {
             "provider": "claude",
-            "source": "oauth",
+            "source": "claude",
             "usage": {
                 "primary": {"usedPercent": 10, "windowDurationMins": 300},
                 "secondary": {"remainingPercent": 55, "windowDurationMins": 10_080},
