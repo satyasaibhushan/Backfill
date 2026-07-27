@@ -25,13 +25,12 @@ def require_identity(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Backfill authentication is not configured",
         )
-    if not _is_loopback(request):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Backfill only accepts identity from its loopback proxy",
-        )
-
     if settings.auth_mode == "dev":
+        if not _is_loopback(request):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Development authentication is loopback-only",
+            )
         identity = Identity(login=settings.allowed_login or "")
     else:
         if not tailscale_login:
