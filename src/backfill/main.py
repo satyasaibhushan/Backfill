@@ -1,4 +1,5 @@
 import asyncio
+import json
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -237,12 +238,21 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
         current = request.app.state.quota.overview()
         with request.app.state.quota.database.transaction() as db:
             meters = {r["account"]: dict(r) for r in db.execute("SELECT * FROM meters")}
+            readings = {r["account"]: dict(r) for r in db.execute("SELECT * FROM meter_readings")}
         accounts = []
         for account in current["accounts"]:
             meter = meters.get(account["key"])
             if not meter:
                 continue
-            obs = account["observation"]
+            reading = readings.get(account["key"])
+            obs = (
+                json.loads(reading["observation"])
+                if reading and reading["observation"]
+                else account["observation"]
+            )
+            identity_matches = not account["observation"] or (
+                obs and obs["source_account"] == account["observation"]["source_account"]
+            )
             windows = obs["windows"] if obs else []
             groups = []
             for label, predicate in [
@@ -277,7 +287,12 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
             accounts.append(
                 {
                     "provider": meter["provider"],
-                    "connected": not stale and not meter["error"],
+                    "connected": bool(
+                        not stale
+                        and identity_matches
+                        and not (reading["error"] if reading else meter["error"])
+                    ),
+                    "execution_ready": not stale and not meter["error"],
                     "windows": groups,
                     "checked_at": meter["checked_at"],
                 }

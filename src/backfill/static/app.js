@@ -197,7 +197,7 @@ function render() {
   $("#capacity").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${a.provider === "claude" ? "✳" : "›_"}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(w.label)} left</span></div>`).join("")}</div>` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
+        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${a.provider === "claude" ? "✳" : "›_"}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(w.label)} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Tasks on hold</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
     )
     .join("");
   const running = data.tasks.filter((t) => t.state === "running").length;
@@ -593,7 +593,7 @@ function renderSettings() {
   $("#account-settings").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="connection"><span>${accountName(a.provider)}</span><small>${a.connected ? "Connected" : "Quota reading unavailable"}</small></div>`,
+        `<div class="connection"><span>${accountName(a.provider)}</span><small>${a.connected ? (a.execution_ready ? "Connected" : "Connected · tasks on hold") : "Quota reading unavailable"}</small></div>`,
     )
     .join("");
   $("#project-settings").innerHTML = data.projects.length

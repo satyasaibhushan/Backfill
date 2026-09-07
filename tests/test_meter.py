@@ -48,3 +48,68 @@ async def test_both_meters_refresh_independently_and_failure_recovers(tmp_path, 
     assert all(a["observation"] for a in service.overview()["accounts"])
     with service.database.transaction() as db:
         assert all(row["error"] is None for row in db.execute("SELECT error FROM meters"))
+
+
+def test_dashboard_keeps_fresh_reading_when_admission_rejects_it(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from backfill.auth import read_secret
+    from backfill.main import create_app
+
+    settings = Settings(data_dir=tmp_path, automation_enabled=False, meter_enabled=False)
+    used = [12]
+    fail = [False]
+    reset = datetime.now(UTC) + timedelta(hours=4)
+
+    async def read(provider, settings):
+        if fail[0]:
+            raise QuotaError("Reader unavailable", 503)
+        now = datetime.now(UTC)
+        return Observation(
+            observed_at=now,
+            covered_through=now,
+            measurement="estimated",
+            source="fixture",
+            source_account=provider,
+            windows=[
+                Window(
+                    name="session",
+                    unit="quota_points",
+                    limit=100,
+                    used=used[0],
+                    resets_at=reset,
+                    duration_seconds=18000,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("backfill.meter.probe", read)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        headers = {"Authorization": "Bearer " + read_secret(settings.root / "owner.token")}
+        client.portal.call(app.state.meter.refresh)
+        used[0] = 10
+        client.portal.call(app.state.meter.refresh)
+        result = client.get("/v2/overview", headers=headers).json()
+        for account in result["accounts"]:
+            assert account["connected"] is True
+            assert account["execution_ready"] is False
+            assert account["windows"][0]["remaining"] == 90
+        assert all(
+            a["observation"]["windows"][0]["used"] == 12
+            for a in app.state.quota.overview()["accounts"]
+        )
+        fail[0] = True
+        client.portal.call(app.state.meter.refresh)
+        assert all(
+            not a["connected"]
+            for a in client.get("/v2/overview", headers=headers).json()["accounts"]
+        )
+        fail[0], used[0] = False, 14
+        client.portal.call(app.state.meter.refresh)
+        assert all(
+            a["connected"] and a["execution_ready"]
+            for a in client.get("/v2/overview", headers=headers).json()["accounts"]
+        )

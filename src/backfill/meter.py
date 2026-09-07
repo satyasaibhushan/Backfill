@@ -51,6 +51,7 @@ class Meter:
 
     async def _one(self, account: str, provider: str) -> None:
         error = None
+        value = None
         try:
             value = await probe(provider, self.settings)
             self.quota.observe(account, value)
@@ -59,6 +60,18 @@ class Meter:
         except Exception:
             error = "Quota refresh failed. Check the provider login on this host."
         with self.quota.database.transaction() as db:
+            # Collector health and admission validity are separate. A rejected quota
+            # update must not hide a fresh reading or imply that login is broken.
+            db.execute(
+                "INSERT INTO meter_readings(account,observation,error) VALUES (?,?,?) "
+                "ON CONFLICT(account) DO UPDATE SET observation=excluded.observation, "
+                "error=excluded.error",
+                (
+                    account,
+                    value.model_dump_json() if value else None,
+                    error if value is None else None,
+                ),
+            )
             db.execute(
                 "UPDATE meters SET checked_at=?,error=? WHERE account=?",
                 (self.quota.clock(), error, account),
