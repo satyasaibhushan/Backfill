@@ -153,6 +153,20 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
         request.app.state.external.sync(await request.json())
         return {"ok": True}
 
+    @app.get("/v2/app-projects", dependencies=owned)
+    def app_projects(request: Request):
+        return [
+            {"id": p["id"], "name": p["name"], "allowance": p["allowance"]}
+            for p in request.app.state.tasks.list()["projects"]
+        ]
+
+    @app.post("/v2/app-connections", dependencies=owned)
+    async def local_connection(request: Request):
+        value = await request.json()
+        if not isinstance(value, dict):
+            raise QuotaError("Invalid project connection", 422)
+        return request.app.state.external.connect_local(value)
+
     @app.get("/v2/external", dependencies=[Depends(application)])
     def external_status(request: Request, principal: Annotated[dict, Depends(application)]):
         project = next(

@@ -24,16 +24,44 @@ class External:
         self.tasks, self.governor = tasks, governor
         with tasks.quota.database.transaction() as db:
             db.executescript(SCHEMA)
+            if "managed_locally" not in {
+                r["name"] for r in db.execute("PRAGMA table_info(app_grants)")
+            }:
+                db.execute(
+                    "ALTER TABLE app_grants ADD COLUMN managed_locally INTEGER NOT NULL DEFAULT 0"
+                )
 
     def sync(self, grants):
         with self.tasks.quota.database.transaction() as db:
-            db.execute("UPDATE app_grants SET revoked=1")
+            db.execute("UPDATE app_grants SET revoked=1 WHERE managed_locally=0")
             for grant in grants:
                 db.execute(
-                    "INSERT INTO app_grants VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                    "INSERT INTO app_grants(id,project,hash,revoked) VALUES (?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
                     "project=excluded.project,hash=excluded.hash,revoked=excluded.revoked",
                     (grant["id"], grant["project"], grant["hash"], grant["revoked"]),
                 )
+
+    def connect_local(self, value):
+        project, key, credential = (value.get(k) for k in ("project", "key", "credential"))
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= 100
+            or not isinstance(credential, str)
+            or not 40 <= len(credential) <= 128
+        ):
+            raise QuotaError("Invalid project connection", 422)
+        if not any(p["id"] == project for p in self.tasks.list()["projects"]):
+            raise QuotaError("Project no longer exists", 404)
+        ident = "local-" + hashlib.sha256((key + ":" + project).encode()).hexdigest()[:32]
+        with self.tasks.quota.database.transaction() as db:
+            db.execute(
+                "INSERT INTO app_grants(id,project,hash,revoked,managed_locally) "
+                "VALUES (?,?,?,0,1) "
+                "ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,revoked=0",
+                (ident, project, hashlib.sha256(credential.encode()).hexdigest()),
+            )
+        return {"id": ident, "project": project}
 
     def identity(self, token):
         with self.tasks.quota.database.transaction() as db:

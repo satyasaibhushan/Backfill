@@ -88,3 +88,17 @@ def test_lost_client_is_not_silently_reexecuted(tasks):
     assert recovered["state"] == "failed"
     assert "Review saved progress" in recovered["reason"]
     assert len(app.get(job["id"])["attempts"]) == 1
+
+
+def test_local_selection_is_scoped_and_survives_cloud_sync(tasks):
+    app, _, _, _, service, _ = connected(tasks)
+    other = app.project(ProjectInput(name="Another budget", allowance=20))
+    value = dict(project=other["id"], key="my-application", credential="x" * 48)
+    grant = service.connect_local(value)
+    assert service.connect_local(value) == grant
+    service.sync([])
+    principal = service.identity(value["credential"])
+    assert principal["project"] == other["id"]
+    assert register(service, principal)["project"] == other["id"]
+    with pytest.raises(QuotaError):
+        service.connect_local({**value, "project": "deleted-project"})

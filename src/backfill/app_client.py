@@ -45,6 +45,55 @@ def connect_app(settings, server, code):
     return {"connected": True, "project": value["project"], "connection": str(connection)}
 
 
+def local_root(settings):
+    worker = Path("~/.local/share/backfill-worker/data").expanduser()
+    return settings.root if settings.socket.exists() else worker
+
+
+def local_projects(settings):
+    root = local_root(settings)
+    with httpx.Client(
+        transport=httpx.HTTPTransport(uds=str(root / "quota.sock")),
+        base_url="http://backfill",
+        timeout=15,
+        headers={"Authorization": "Bearer " + read_secret(root / "owner.token")},
+    ) as client:
+        response = client.get("/v2/app-projects")
+        response.raise_for_status()
+        return response.json()
+
+
+def connect_local(settings, project, key):
+    import hashlib
+
+    root = local_root(settings)
+    directory = Path("~/.local/share/backfill/connections").expanduser()
+    private_directory(directory)
+    ident = "local-" + hashlib.sha256((key + ":" + project).encode()).hexdigest()[:32]
+    path = directory / (ident + ".json")
+    pending = directory / (ident + ".pending")
+    if path.exists():
+        credential = json.loads(read_secret(path))["credential"]
+    else:
+        if not pending.exists():
+            write_secret(pending, secrets.token_urlsafe(48))
+        credential = read_secret(pending)
+    with httpx.Client(
+        transport=httpx.HTTPTransport(uds=str(root / "quota.sock")),
+        base_url="http://backfill",
+        timeout=15,
+        headers={"Authorization": "Bearer " + read_secret(root / "owner.token")},
+    ) as client:
+        response = client.post(
+            "/v2/app-connections", json={"project": project, "key": key, "credential": credential}
+        )
+        response.raise_for_status()
+        value = response.json()
+    write_secret(path, json.dumps({**value, "credential": credential, "root": str(root)}))
+    pending.unlink(missing_ok=True)
+    return {"connected": True, "project": project, "connection": str(path)}
+
+
 def emit(value):
     print(json.dumps(value), flush=True)
 

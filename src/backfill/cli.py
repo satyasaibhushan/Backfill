@@ -53,6 +53,12 @@ def parser() -> argparse.ArgumentParser:
     )
     app_connection.add_argument("--server", required=True)
     app_connection.add_argument("--code", required=True)
+    commands.add_parser("app-projects", help="list projects available to local applications")
+    local_connection = commands.add_parser(
+        "connect-project", help="authorize a selected local project"
+    )
+    local_connection.add_argument("--project", required=True)
+    local_connection.add_argument("--key", required=True)
     app_run = commands.add_parser("run-app", help="guard a run owned by an application")
     app_run.add_argument("--connection", type=Path, required=True)
     app_run.add_argument("--json", default="-")
@@ -102,6 +108,16 @@ def run(args: argparse.Namespace) -> int:
         from backfill.app_client import connect_app
 
         emit(connect_app(settings, args.server, args.code))
+        return 0
+    if args.command == "app-projects":
+        from backfill.app_client import local_projects
+
+        emit(local_projects(settings))
+        return 0
+    if args.command == "connect-project":
+        from backfill.app_client import connect_local
+
+        emit(connect_local(settings, args.project, args.key))
         return 0
     if args.command == "run-app":
         from backfill.app_client import execute
