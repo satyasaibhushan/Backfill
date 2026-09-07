@@ -102,3 +102,19 @@ def test_local_selection_is_scoped_and_survives_cloud_sync(tasks):
     assert register(service, principal)["project"] == other["id"]
     with pytest.raises(QuotaError):
         service.connect_local({**value, "project": "deleted-project"})
+
+
+def test_auto_retry_can_move_between_account_scoped_workloads(tasks):
+    app, clock, observe, _, service, principal = connected(tasks)
+    job = register(service, principal)
+    first = service.start(principal, job["id"])
+    assert first["provider"] == "claude"
+    record = service.record(principal, job["id"])
+    app.finish(job["id"], record["attempt"], "waiting", "pause for quota")
+    clock[0] += 7 * 86400 + 1
+    observe("claude", 99, offset=7)
+    observe("codex", 1, offset=7)
+    second = service.start(principal, job["id"])
+    assert second["provider"] == "codex"
+    assert second["workload"] != first["workload"]
+    assert app.get(job["id"])["selected_provider"] == "codex"

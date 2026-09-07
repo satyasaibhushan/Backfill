@@ -116,7 +116,7 @@ def test_dashboard_keeps_fresh_reading_when_admission_rejects_it(tmp_path, monke
         )
 
 
-def test_model_quota_is_separate_and_missing_reading_stays_held(tmp_path, monkeypatch):
+def test_model_quota_partial_sample_preserves_fresh_complete_reading(tmp_path, monkeypatch):
     from datetime import timedelta
 
     from fastapi.testclient import TestClient
@@ -183,12 +183,14 @@ def test_model_quota_is_separate_and_missing_reading_stays_held(tmp_path, monkey
         client.portal.call(app.state.meter.refresh)
         missing = accounts()["claude"]
         assert missing["connected"] is True
-        assert missing["execution_ready"] is False
-        assert missing["windows"][-1] == {
-            "label": "Fable weekly",
-            "remaining": None,
-            "resets_at": None,
-        }
+        assert missing["execution_ready"] is True
+        assert missing["windows"] == first["claude"]["windows"]
+        # A cached complete sample must expire even if partial samples keep arriving.
+        original_clock = app.state.quota.clock
+        monkeypatch.setattr(app.state.quota, "clock", lambda: original_clock() + 181)
+        client.portal.call(app.state.meter.refresh)
+        assert accounts()["claude"]["execution_ready"] is False
+        monkeypatch.setattr(app.state.quota, "clock", original_clock)
         include_model[0] = True
         client.portal.call(app.state.meter.refresh)
         assert accounts()["claude"]["execution_ready"] is True

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     provider_timeout_seconds: float = Field(default=45, gt=0, le=120)
     provider_settle_seconds: int = Field(default=120, ge=0, le=3600)
     codex_command: str = "codex"
+    codex_task_model: str = "gpt-5.6-luna"
+    codex_task_reasoning: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     codexbar_command: str = "codexbar"
     claude_command: str = "claude"
     claude_quota_source: Literal["auto", "oauth", "cli", "web"] | None = None

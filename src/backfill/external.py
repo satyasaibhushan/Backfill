@@ -149,7 +149,7 @@ class External:
             attempt = self.tasks.start(key, provider)
             if not attempt:
                 return {"decision": "wait", "reason": "Run is already claimed"}
-            workload = "ext." + key
+            workload = "ext." + key + "." + provider
             self.tasks.quota.set_workload(
                 workload, WorkloadInput(account=provider, priority=PRIORITY[job["priority"]])
             )

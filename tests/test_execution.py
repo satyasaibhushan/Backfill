@@ -72,10 +72,12 @@ else:
         if method=="initialize":emit({{"id":event["id"],"result":{{}}}})
         elif method=="thread/start":
             assert event["params"]["approvalPolicy"]=="never"
+            assert event["params"]["model"]=="gpt-5.6-luna"
             expected="workspace-write" if {access!r}=="edit" else "read-only"
             assert event["params"]["sandbox"]==expected
             emit({{"id":event["id"],"result":{{"thread":{{"id":"thread-one"}}}}}})
         elif method=="turn/start":
+            assert event["params"]["effort"]=="high"
             prompt=event["params"]["input"][0]["text"]
             text="Verified result: " + (
                 "revision includes evidence" if "Reviewer feedback" in prompt

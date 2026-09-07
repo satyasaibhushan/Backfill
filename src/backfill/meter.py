@@ -4,7 +4,7 @@ from contextlib import suppress
 from backfill.config import Settings
 from backfill.providers.observe import probe
 from backfill.quota import QuotaError, QuotaService
-from backfill.schemas import Policy
+from backfill.schemas import Observation, Policy
 
 
 class Meter:
@@ -59,6 +59,24 @@ class Meter:
             error = failure.message
         except Exception:
             error = "Quota refresh failed. Check the provider login on this host."
+        if error == "observation omitted a known quota window":
+            with self.quota.database.transaction() as db:
+                row = db.execute(
+                    "SELECT observation,policy FROM accounts WHERE key=?", (account,)
+                ).fetchone()
+            if row and row["observation"]:
+                previous = Observation.model_validate_json(row["observation"])
+                policy = Policy.model_validate_json(row["policy"])
+                now = self.quota.clock()
+                # A partial sample does not invalidate a still-fresh complete sample.
+                # Keep its original timestamps; never extend its admission lifetime.
+                if (
+                    now - previous.observed_at.timestamp() <= policy.snapshot_ttl_seconds
+                    and now - previous.covered_through.timestamp()
+                    <= policy.snapshot_ttl_seconds * 2
+                    and all(w.resets_at.timestamp() > now for w in previous.windows)
+                ):
+                    value, error = previous, None
         with self.quota.database.transaction() as db:
             # Collector health and admission validity are separate. A rejected quota
             # update must not hide a fresh reading or imply that login is broken.

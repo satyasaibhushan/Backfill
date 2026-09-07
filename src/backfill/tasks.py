@@ -381,7 +381,7 @@ class Tasks:
         if prefs.paused or (prefs.paused_until and prefs.paused_until.timestamp() > self.now()):
             return None, "All work is paused."
         overview = self.quota.overview()
-        preferred = job["selected_provider"] or job["provider"]
+        preferred = job["provider"]
         candidates = []
         for account in overview["accounts"]:
             key = account["key"]

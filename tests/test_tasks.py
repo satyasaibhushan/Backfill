@@ -281,3 +281,15 @@ def test_legacy_consumption_corrects_reset_timestamp_jitter(tasks):
     clock[0] += 60
     app.finish(job["id"], attempt["id"], "review")
     assert app.get(job["id"])["consumption"]["windows"][0]["used"] == 2
+
+
+def test_auto_retry_reselects_provider_but_explicit_selection_stays(tasks):
+    app, clock, observe = tasks
+    job = new(app)
+    job["selected_provider"] = "codex"
+    assert app.select(job)[0] == "claude"
+    job["provider"] = "codex"
+    assert app.select(job)[0] is None
+    clock[0] += 7 * 86400 + 1
+    observe("codex", 1, offset=7)
+    assert app.select(job)[0] == "codex"

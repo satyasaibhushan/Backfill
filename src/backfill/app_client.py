@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from backfill.auth import private_directory, read_secret, write_secret
+from backfill.config import load_settings
 from backfill.worker import check_server
 
 
@@ -99,6 +100,7 @@ def emit(value):
 
 
 async def execute(connection_path, request):
+    settings = load_settings()
     config = json.loads(read_secret(connection_path))
     root = Path(config["root"])
     async with httpx.AsyncClient(
@@ -249,6 +251,7 @@ async def execute(connection_path, request):
                                 "method": "thread/start",
                                 "params": {
                                     "cwd": cwd,
+                                    "model": settings.codex_task_model,
                                     "approvalPolicy": "never",
                                     "sandbox": "workspace-write"
                                     if job["access"] == "edit"
@@ -263,6 +266,7 @@ async def execute(connection_path, request):
                                 "method": "turn/start",
                                 "params": {
                                     "threadId": event["result"]["thread"]["id"],
+                                    "effort": settings.codex_task_reasoning,
                                     "input": [{"type": "text", "text": prompt}],
                                 },
                             }

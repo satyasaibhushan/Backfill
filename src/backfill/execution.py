@@ -65,7 +65,7 @@ class Execution:
     async def run(self, job: dict, attempt: dict) -> None:
         process = None
         state, reason = "failed", "The executor stopped before producing a result."
-        workkey = f"job.{job['id']}"
+        workkey = f"job.{job['id']}.{attempt['provider']}"
         output = ""
         try:
             provider = attempt["provider"]
@@ -198,6 +198,7 @@ class Execution:
                                     "method": "thread/start",
                                     "params": {
                                         "cwd": cwd,
+                                        "model": settings.codex_task_model,
                                         "approvalPolicy": "never",
                                         "sandbox": "read-only"
                                         if job["access"] == "read"
@@ -213,6 +214,7 @@ class Execution:
                                     "method": "turn/start",
                                     "params": {
                                         "threadId": thread,
+                                        "effort": settings.codex_task_reasoning,
                                         "input": [{"type": "text", "text": prompt}],
                                     },
                                 }
