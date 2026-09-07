@@ -3,7 +3,7 @@
 Backfill is where background work waits, runs, and returns for review.
 
 The queue contains real instructions rather than budget keys. A default task needs
-only a name and an outcome. Project, priority, schedule, account preference, allowance,
+only a name and an outcome. Project, priority, account preference, allowance,
 and permissions are optional choices. The system chooses an account with available
 capacity and preserves that choice for later attempts so context stays coherent.
 
@@ -20,8 +20,8 @@ percentage allowance.
 Assumptions for this release:
 
 - One background task at a time prioritizes predictable quota accounting.
-- Daily/weekly schedules cover recurring work; arbitrary cron belongs in an external
-  scheduler that submits through the API until there is a demonstrated need for more.
+- Scheduling is disabled for now. Every new task enters the queue immediately.
+  Source links belong in instructions. Existing stored results and history are retained.
 - Native permissions stay enabled. Research is the default; editing is explicit.
 - Review approval records acceptance. Publishing, merging, and deployment remain
   explicit actions outside the task runner.

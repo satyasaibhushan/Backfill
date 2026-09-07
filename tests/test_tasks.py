@@ -101,9 +101,9 @@ def test_allowance_charges_account_movement_and_shared_project(tasks):
     assert app.spending(first, "claude", windows) == (6, 6)
 
 
-def test_review_gate_feedback_and_recurrence(tasks):
+def test_review_gate_feedback_and_completion(tasks):
     app, clock, _ = tasks
-    job = new(app, schedule="daily")
+    job = new(app)
     with pytest.raises(QuotaError):
         app.action(job["id"], TaskAction(action="approve"))
     attempt = app.start(job["id"], "claude")
@@ -115,7 +115,7 @@ def test_review_gate_feedback_and_recurrence(tasks):
     attempt = app.start(job["id"], "claude")
     app.finish(job["id"], attempt["id"], "review")
     accepted = app.action(job["id"], TaskAction(action="approve"))
-    assert accepted["state"] == "queued" and accepted["due"] > clock[0]
+    assert accepted["state"] == "done"
     assert not app.candidates()
 
 
@@ -213,3 +213,71 @@ def test_personal_reserve_is_a_floor_after_history_is_available(tasks):
     for account in app.quota.overview()["accounts"]:
         assert account["policy"]["minimum_user_percent"] == 60
         assert account["policy"]["cold_start_user_percent"] == 60
+
+
+def test_scheduling_is_disabled_and_links_become_instructions(tasks):
+    app, clock, _ = tasks
+    with pytest.raises(QuotaError, match="Scheduling"):
+        new(app, schedule="daily")
+    with pytest.raises(QuotaError, match="Scheduling"):
+        new(app, scheduled_at=datetime.fromtimestamp(clock[0] + 60, UTC))
+    job = new(app, source_url="https://example.com/task")
+    assert not job["source_url"] and job["instructions"].endswith("https://example.com/task")
+
+
+def test_consumption_survives_completion_and_sums_revisions(tasks):
+    app, clock, observe = tasks
+    job = new(app)
+    assert app.get(job["id"])["consumption"]["windows"] == []
+    for used in (4, 7):
+        attempt = app.start(job["id"], "claude")
+        clock[0] += 10
+        observe("claude", used)
+        app.charge(attempt)
+        app.finish(job["id"], attempt["id"], "review")
+        if used == 4:
+            app.action(job["id"], TaskAction(action="revise", feedback="More detail"))
+    app.action(job["id"], TaskAction(action="approve"))
+    restored = Tasks(app.quota, app.settings).get(job["id"])
+    assert restored["consumption"] == {
+        "windows": [{"provider": "claude", "label": "Weekly", "used": 5}],
+        "incomplete": False,
+    }
+    clock[0] += 604800
+    observe("claude", 1, offset=7)
+    assert app.get(job["id"])["consumption"] == restored["consumption"]
+
+
+def test_reset_during_run_preserves_total_and_timestamp_jitter_is_not_new_usage(tasks):
+    app, clock, observe = tasks
+    job = new(app)
+    attempt = app.start(job["id"], "claude")
+    clock[0] += 10
+    observe("claude", 4)
+    app.charge(attempt)
+    clock[0] += 120
+    observe("claude", 4, offset=1 / 1440)
+    app.charge(attempt)
+    assert app.get(job["id"])["consumption"]["windows"][0]["used"] == 2
+    clock[0] += 604800
+    observe("claude", 3, offset=7)
+    app.charge(attempt)
+    assert app.get(job["id"])["consumption"]["windows"][0]["used"] == 5
+
+
+def test_legacy_consumption_corrects_reset_timestamp_jitter(tasks):
+    import json
+
+    app, clock, _ = tasks
+    job = new(app)
+    attempt = app.start(job["id"], "claude")
+    original = attempt["baseline"]["windows"][0]
+    shifted = (datetime.fromisoformat(original["resets_at"]) + timedelta(seconds=30)).isoformat()
+    with app.quota.database.transaction() as db:
+        db.execute(
+            "UPDATE attempts SET spending=? WHERE id=?",
+            (json.dumps({"weekly": {"used": 4, "reset": shifted}}), attempt["id"]),
+        )
+    clock[0] += 60
+    app.finish(job["id"], attempt["id"], "review")
+    assert app.get(job["id"])["consumption"]["windows"][0]["used"] == 2

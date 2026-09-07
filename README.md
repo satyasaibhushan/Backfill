@@ -12,7 +12,7 @@ merges, or deploys changes.
 - Real tasks with instructions, a working folder, priority, and saved results.
 - Automatic selection between the two connected subscription accounts.
 - Shared project allowances and a personal reserve, expressed as percentages.
-- One-time, daily, and weekly work. Repeated work waits for review before repeating.
+- One-time work with review and revisions. Scheduling is disabled for now.
 - Pause one task or all work until a date. Pausing is a management action.
 - Persistent queue and run history. Interrupted work needs attention after restart.
 - The same task submission API for the dashboard, CLI, and other automation tools.
@@ -50,8 +50,7 @@ backfill task --json task.json
   "priority": "normal",
   "provider": "auto",
   "allowance": 5,
-  "access": "read",
-  "schedule": "once"
+  "access": "read"
 }
 ```
 
@@ -92,3 +91,6 @@ uv run ruff format --check src tests
 Tests cover quota accounting, native process termination, durable scheduling,
 percentage ceilings, permissions, and the submit → execute → review → revise flow
 through both real guard transports with deterministic executors.
+
+Completed tasks retain estimated session and weekly consumption across all attempts.
+Provider reporting lag and concurrent account use limit attribution accuracy.

@@ -18,7 +18,8 @@ from backfill.schemas import Observation, Window
 
 
 @pytest.mark.parametrize("provider", ["claude", "codex"])
-def test_submit_execute_review_and_revise_through_actual_guard(provider):
+@pytest.mark.parametrize("access", ["read", "edit"])
+def test_submit_execute_review_and_revise_through_actual_guard(provider, access):
     with tempfile.TemporaryDirectory(prefix="task-", dir="/tmp") as directory:
         root = Path(directory)
         token = owner_token(root)
@@ -53,6 +54,10 @@ import sys,json
 
 def emit(value):print(json.dumps(value),flush=True)
 if "-p" in sys.argv:
+    allowed=sys.argv[sys.argv.index("--tools")+1].split(",")
+    assert ("Write" in allowed)==({access!r}=="edit")
+    mode=sys.argv[sys.argv.index("--permission-mode")+1]
+    assert mode==("acceptEdits" if {access!r}=="edit" else "dontAsk")
     prompt=sys.stdin.read()
     text="Verified result: " + (
         "revision includes evidence" if "Reviewer feedback" in prompt else "seven files reviewed"
@@ -63,6 +68,9 @@ else:
         event=json.loads(line);method=event.get("method")
         if method=="initialize":emit({{"id":event["id"],"result":{{}}}})
         elif method=="thread/start":
+            assert event["params"]["approvalPolicy"]=="never"
+            expected="workspace-write" if {access!r}=="edit" else "read-only"
+            assert event["params"]["sandbox"]==expected
             emit({{"id":event["id"],"result":{{"thread":{{"id":"thread-one"}}}}}})
         elif method=="turn/start":
             prompt=event["params"]["input"][0]["text"]
@@ -118,6 +126,7 @@ else:
                     json={
                         "title": "Inspect files",
                         "instructions": "Review seven files",
+                        "access": access,
                         "provider": provider,
                     },
                 )

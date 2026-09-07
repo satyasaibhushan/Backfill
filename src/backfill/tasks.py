@@ -90,6 +90,55 @@ class Tasks:
                 (Preferences().model_dump_json(),),
             )
 
+    @staticmethod
+    def unscheduled(value: TaskInput) -> None:
+        if value.schedule != "once" or value.scheduled_at is not None:
+            raise QuotaError("Scheduling is not available. Queue a one-time task.", 422)
+        if value.source_url:
+            value.instructions += "\n\n" + value.source_url
+            value.source_url = ""
+
+    @staticmethod
+    def consumption(db) -> dict:
+        totals, incomplete = {}, set()
+        for row in db.execute("SELECT job,provider,baseline,spending,finished FROM attempts"):
+            job = row["job"]
+            sums = totals.setdefault(job, {})
+            baseline = json.loads(row["baseline"])
+            charges = json.loads(row["spending"])
+            for window in baseline["windows"]:
+                charge = charges.get(window["name"])
+                if charge is None:
+                    incomplete.add(job)
+                    continue
+                label = "Session" if window["duration_seconds"] <= 86400 else "Weekly"
+                key = (row["provider"], label, window["name"])
+                used = charge.get("total", charge["used"])
+                # Older runs counted the whole window when its reset estimate moved.
+                # Recover the delta when the original reset had not actually occurred.
+                if (
+                    "total" not in charge
+                    and charge["reset"] != window["resets_at"]
+                    and row["finished"] is not None
+                    and datetime.fromisoformat(window["resets_at"]).timestamp() > row["finished"]
+                ):
+                    used = max(0, used - 100 * window["used"] / window["limit"])
+                sums[key] = sums.get(key, 0) + used
+        result = {}
+        for job, sums in totals.items():
+            groups = {}
+            for (provider, label, _), used in sums.items():
+                key = (provider, label)
+                groups[key] = max(groups.get(key, 0), used)
+            result[job] = {
+                "windows": [
+                    {"provider": provider, "label": label, "used": used}
+                    for (provider, label), used in sorted(groups.items())
+                ],
+                "incomplete": job in incomplete,
+            }
+        return result
+
     def now(self) -> float:
         return self.quota.clock()
 
@@ -139,6 +188,7 @@ class Tasks:
         return {"id": key, **value.model_dump(mode="json")}
 
     def create(self, value: TaskInput) -> dict:
+        self.unscheduled(value)
         value.folder = self.folder(value.folder)
         with self.quota.database.transaction() as db:
             if value.project:
@@ -185,9 +235,13 @@ class Tasks:
                     (key,),
                 )
             ]
+            result["consumption"] = self.consumption(db).get(
+                key, {"windows": [], "incomplete": True}
+            )
         return result
 
     def update(self, key: str, value: TaskInput) -> dict:
+        self.unscheduled(value)
         value.folder = self.folder(value.folder)
         with self.quota.database.transaction() as db:
             row = self._job(db, key)
@@ -235,13 +289,7 @@ class Tasks:
             elif value.action == "approve":
                 if state != "review":
                     raise QuotaError("Only a completed result can be approved.")
-                config = TaskInput.model_validate_json(row["config"])
-                state = "done" if config.schedule == "once" else "queued"
-                if state == "queued":
-                    interval = 86400 if config.schedule == "daily" else 604800
-                    due = row["due"] + interval
-                    while due <= self.now():
-                        due += interval
+                state = "done"
             elif value.action == "revise":
                 if state != "review" or not value.feedback.strip():
                     raise QuotaError("Write feedback on a completed result.", 422)
@@ -274,7 +322,14 @@ class Tasks:
     def list(self) -> dict:
         with self.quota.database.transaction() as db:
             rows = db.execute("SELECT * FROM jobs ORDER BY created DESC").fetchall()
-            jobs = [self.public(r) for r in rows]
+            usage = self.consumption(db)
+            jobs = [
+                {
+                    **self.public(r),
+                    "consumption": usage.get(r["id"], {"windows": [], "incomplete": True}),
+                }
+                for r in rows
+            ]
             projects = [
                 {"id": r["id"], **json.loads(r["config"])}
                 for r in db.execute("SELECT * FROM spaces ORDER BY rowid")
@@ -416,6 +471,12 @@ class Tasks:
         if not current:
             return
         old = {w["name"]: w for w in attempt["baseline"]["windows"]}
+        with self.quota.database.transaction() as db:
+            previous = json.loads(
+                db.execute("SELECT spending FROM attempts WHERE id=?", (attempt["id"],)).fetchone()[
+                    0
+                ]
+            )
         charges = {}
         for window in current["windows"]:
             base = old.get(window["name"])
@@ -423,11 +484,24 @@ class Tasks:
                 used = (
                     max(0, window["used"] - base["used"])
                     if base["resets_at"] == window["resets_at"]
+                    or datetime.fromisoformat(base["resets_at"])
+                    > datetime.fromisoformat(current["covered_through"])
                     else window["used"]
                 )
+                used = 100 * used / window["limit"]
+                prior = previous.get(window["name"])
+                total = used
+                if prior:
+                    reset_passed = prior["reset"] != window["resets_at"] and datetime.fromisoformat(
+                        prior["reset"]
+                    ) <= datetime.fromisoformat(current["covered_through"])
+                    total = prior.get("total", prior["used"]) + (
+                        used if reset_passed else max(0, used - prior["used"])
+                    )
                 charges[window["name"]] = {
                     "reset": window["resets_at"],
-                    "used": 100 * used / window["limit"],
+                    "used": used,
+                    "total": total,
                 }
         with self.quota.database.transaction() as db:
             db.execute(

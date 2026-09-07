@@ -153,8 +153,7 @@
                 Native permissions remain in effect.
               </p>
               <p>
-                One background task runs at a time. Repeated tasks wait for your
-                review before running again. Approving a result marks it
+                One background task runs at a time. Approving a result marks it
                 reviewed; it does not publish or deploy anything.
               </p>
             </details>
@@ -207,18 +206,7 @@
           >
         </div>
         <details class="task-options">
-          <summary>Schedule & options</summary>
-          <div class="form-row">
-            <label
-              >Repeat<select id="schedule">
-                <option value="once">Don't repeat</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-              </select></label
-            ><label
-              >Start after<input type="datetime-local" id="scheduled_at"
-            /></label>
-          </div>
+          <summary>Options</summary>
           <label
             >Working folder<input
               id="folder"
@@ -235,7 +223,7 @@
                 <option value="codex">Codex</option>
               </select></label
             ><label
-              >Allowance per window
+              >Session & weekly allowance
               <div class="suffix-input">
                 <input
                   id="allowance"
@@ -253,12 +241,7 @@
               <option value="read">Research & read files</option>
               <option value="edit">Edit files using native permissions</option>
             </select></label
-          ><label
-            >Source link<input
-              id="source_url"
-              type="url"
-              placeholder="Optional ticket or reference"
-          /></label>
+          >
         </details>
         <div class="form-error" role="alert"></div>
         <div class="dialog-actions">
