@@ -1,14 +1,14 @@
 [project]
 name = "backfill"
-version = "0.1.0"
-description = "Backfill high-value engineering work into spare coding-provider capacity."
+version = "0.3.0"
+description = "Run background work within shared account capacity."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi[standard]>=0.128.0",
+    "fastapi>=0.128.0",
+    "uvicorn>=0.40.0",
     "httpx>=0.28.0",
     "pydantic-settings>=2.11.0",
-    "sqlmodel>=0.0.31",
 ]
 
 [project.scripts]
@@ -20,9 +20,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backfill"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/backfill/static" = "backfill/static"
 
 [tool.fastapi]
 entrypoint = "backfill.main:app"

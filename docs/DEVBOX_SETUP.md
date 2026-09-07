@@ -1,97 +1,47 @@
-# Devbox setup
+# Deployment
 
-Backfill is private to the tailnet. It does not use Cloudflare, a public DNS
-record, or a Google OAuth application.
+Backfill runs on the host whose working folders and native logins it uses. Choose
+one active service for a queue; do not run separate copies against the same accounts.
+The dashboard is loopback-only, on port 8431. Never expose its listener publicly.
 
-## Identity
+## macOS
 
-Devbox's current Tailscale identity is:
+Install the locked environment with `uv sync --locked`, then run
+`python3 deploy/install-macos.py` from the checkout. The installer creates the
+`com.backfill.service` LaunchAgent and uses `~/.local/share/backfill` for persistent
+private state. It preserves existing data. Logs are in that directory's `service.log`.
+The service starts at login and restarts after a crash. Work stops while the Mac
+is asleep or logged out. This is not an always-on remote host.
 
-```text
-satyasaibhushan@github
-```
+Run `.venv/bin/backfill dashboard` to open a private session. The one-use link expires
+in 60 seconds; the browser session lasts eight hours. Check `/health` and both account
+cards after installation. Submit a small read-only task and verify its saved result.
 
-Tailscale Serve injects that identity into proxied requests. Backfill accepts
-only the exact value configured in `BACKFILL_ALLOWED_LOGIN`.
+For an update, pause work, wait for the running task to stop, update the checkout,
+install its locked environment, and rerun the installer. Interrupted work retains
+partial output and requires an explicit retry. Back up the data directory while the
+service is stopped before a schema-changing update.
 
-## 1. Prepare Backfill
+## Linux / devbox
 
-Devbox requires Python 3.12 or newer, Git, Codex, Claude, and CodexBar.
+Use a real, writable checkout path owned by the execution user. The included user
+unit assumes `~/apps/backfill`; change it to the verified path on your host. Install
+with `uv sync --locked --no-dev`, copy the environment example to
+`~/.config/backfill/backfill.env`, and set native executable paths for that user.
+Copy the unit to `~/.config/systemd/user/backfill.service`, reload the user manager,
+and enable/start it. An administrator must enable user lingering for execution after
+SSH logout. Verify persistence after disconnecting before calling this deployed.
 
-```bash
-git clone git@github.com:satyasaibhushan/Backfill.git /srv/code/Backfill
-cd /srv/code/Backfill
-python3 -m venv .venv
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install .
-```
+Both native executors and a working quota reader must be installed and authenticated
+as the service user. A signed-in status alone does not prove quota access. Check fresh
+meter readings as well as a bounded task. Missing or incomplete telemetry holds work.
+Do not copy login secrets into the environment file, substitute zero usage, or run
+another reader against the same binding.
 
-Install CodexBar's Linux CLI from its official release tarball or Homebrew
-formula, then verify:
+Connect through an authenticated SSH tunnel to port 8431. Generate the dashboard link
+on the execution host and open it through that tunnel. Folder paths in tasks refer to
+the remote host. `BACKFILL_DASHBOARD_PORT=0` disables TCP and retains the private socket.
 
-```bash
-codexbar usage --provider claude --source cli --format json
-```
-
-CodexBar's Claude probe deliberately reuses the working Claude CLI session
-instead of maintaining a separate web or OAuth credential. Codex and Claude
-must be signed in as the accounts whose capacity Backfill may consume.
-
-## 2. Configure Backfill
-
-```bash
-mkdir -p ~/.config/backfill
-cp /srv/code/Backfill/deploy/backfill.env.example ~/.config/backfill/backfill.env
-chmod 600 ~/.config/backfill/backfill.env
-```
-
-Keep these safety switches during initial validation:
-
-```dotenv
-BACKFILL_SCHEDULER_ENABLED=false
-BACKFILL_ENABLE_CLAUDE_EXECUTION=false
-```
-
-## 3. Install the user service
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp /srv/code/Backfill/deploy/backfill.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now backfill.service
-```
-
-Verify the loopback origin:
-
-```bash
-curl -s http://127.0.0.1:8430/api/health
-systemctl --user status backfill.service
-```
-
-API routes other than health intentionally reject direct loopback requests
-because they do not carry a Tailscale identity.
-
-## 4. Publish privately with Tailscale Serve
-
-```bash
-tailscale serve --bg 8430
-tailscale serve status
-```
-
-The dashboard becomes available only inside the tailnet at:
-
-```text
-https://devbox-mark-one.tail6a992e.ts.net
-```
-
-Tailscale access rules still apply. Funnel must remain disabled.
-
-## 5. Controlled first dispatch
-
-1. Run `.venv/bin/backfill probe`.
-2. Create one small task against a clean, disposable repository with `upstream`
-   configured.
-3. Keep Claude execution disabled.
-4. Enable the scheduler, restart the service, and use **Dispatch now**.
-5. Inspect the worktree, branch, transcript, and quota movement.
-6. Pause the scheduler again before enabling unattended operation.
+Meter refresh defaults to 45 seconds. The 120-second settlement buffer estimates
+provider reporting lag; it is not a publication guarantee. See
+[guarded execution](GUARDED_EXECUTION.md) for accounting and interruption boundaries.

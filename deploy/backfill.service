@@ -1,18 +1,16 @@
 [Unit]
-Description=Backfill capacity-aware engineering scheduler
-After=network-online.target
-Wants=network-online.target
+Description=Backfill background work
 
 [Service]
 Type=simple
-WorkingDirectory=/srv/code/Backfill
+WorkingDirectory=%h/apps/backfill
 EnvironmentFile=%h/.config/backfill/backfill.env
-ExecStart=/srv/code/Backfill/.venv/bin/backfill serve
+ExecStart=%h/apps/backfill/.venv/bin/backfill serve
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20
-KillMode=mixed
-
+KillMode=control-group
+UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

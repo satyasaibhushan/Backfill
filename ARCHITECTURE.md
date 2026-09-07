@@ -1,85 +1,39 @@
 # Architecture
 
-## Product boundary
+Backfill has a small task application above an independently usable quota core.
 
-Backfill is a capacity-aware batch scheduler for coding-agent jobs. It does not
-replace Codex, Claude Code, CodexBar, GitHub, or an issue tracker. It coordinates
-them and keeps a durable record of why a job did or did not run.
+- `tasks.py`: durable task, project, review, schedule, and percentage-allocation state.
+- `execution.py`: one queued task at a time, driven through native guarded transports.
+- `quota.py`, `forecast.py`: account windows, personal reserves, safe admission.
+- `governor.py`, `guard.py`, `watchdog.py`: native accounting and process interruption.
+- `meter.py`, `providers/`: account telemetry with identity and freshness checks.
+- `main.py`: authenticated v1 quota API, v2 task API, and the static dashboard.
 
-## Components
+The task application can be disabled with `BACKFILL_AUTOMATION_ENABLED=false`.
+The quota API and guards remain usable by independent callers. Task discovery and
+external workflow definitions submit actual work through the same API as the UI.
 
-### Identity and control plane
+## State
 
-FastAPI serves the private dashboard and typed JSON API on loopback. Tailscale
-Serve provides tailnet-only HTTPS, removes caller-supplied identity headers,
-and adds `Tailscale-User-Login` for the authenticated user. Backfill requires
-that login to equal one configured identity.
+SQLite stores account observations, grants, native usage, projects, task instructions,
+attempts, results, review feedback, and schedules. Existing v1/v2 quota databases are
+preserved. Task tables are additive. The old `backfill.db` is never rewritten.
 
-All state-changing browser requests must also carry the dashboard marker and
-the configured HTTPS origin. The backend never listens on the LAN or tailnet
-interface, so remote callers cannot bypass the identity-injecting proxy.
+A task moves from queued or waiting to running, then review or needs-attention.
+A reviewed one-off task is complete. Reviewed repeating tasks receive their next due
+time, skipping missed occurrences. A revision queues a new attempt with the previous
+result and feedback. A restart marks unfinished attempts interrupted instead of
+silently duplicating work. Task creation never starts paused.
 
-### Durable state
+Account percentages are distinct from native tokens. Task and project percentage
+charges use account movement for the matching provider window/reset. The process
+monitor checks current allocations while native guards independently enforce fresh
+account reserves and bounded execution. Unknown native spending retains its hold.
 
-SQLite stores tasks, runs, event lines, provider observations, and scheduler
-control state. The scheduler marks an in-flight run blocked after a daemon
-restart rather than pretending that it continued.
+## Security
 
-### Capacity plane
-
-Provider adapters produce a common snapshot:
-
-- readiness and freshness;
-- account and plan identity;
-- every quota window the provider actually exposes, normalized by duration;
-- reset timestamps;
-- source and error provenance.
-
-Codex uses `account/rateLimits/read` through `codex app-server`. Claude uses
-CodexBar's structured CLI output. Every collector has a hard timeout. The last
-good result may be shown as stale for ten minutes, but stale data is never
-eligible for scheduling.
-
-### Scheduler
-
-Jobs are inspected in descending priority, then creation order. A provider fits
-when:
-
-```text
-min(reported window remaining - that window's protected reserve)
-    >= task estimated quota cost
-```
-
-Task-specific minimums can raise either reserve. Missing windows are not
-invented. Among fitting providers, Backfill chooses the one with the most
-headroom remaining after the estimate.
-
-### Execution plane
-
-The runner rejects dirty repositories, fetches the configured canonical primary
-branch, and creates one branch/worktree per task. Codex runs with
-`workspace-write` sandboxing and no approval prompts. Claude execution remains
-off until its allowed-tool policy is reviewed on the actual Devbox.
-
-An exit status of zero means `review`, not `done`: tests and changes are visible,
-but a human still owns committing, pushing, and merging.
-
-## State machine
-
-```text
-queued ──dispatch──> running ──exit 0──> review
-  │                    │  └──exit != 0──> failed
-  │                    ├──safety check──> blocked
-  │                    ├──owner hold────> paused
-  │                    └──owner cancel──> cancelled
-  └<────────────── retry / requeue ───────┘
-```
-
-## Deliberate first-version limits
-
-- One concurrent run by default.
-- No automatic commits, pushes, PRs, merges, or worktree deletion.
-- No mid-turn provider switching. Provider choice occurs at a task boundary.
-- Quota-cost estimates are supplied per task; historical calibration is a
-  later scheduling refinement.
-- No issue-tracker ingestion yet. Jobs are created in the dashboard or API.
+The server binds loopback and a private Unix socket, with owner credentials and
+worker-scoped credentials. Browser sessions are HttpOnly, SameSite, and same-origin
+for mutations. The dashboard renders result text without executing model-provided HTML.
+Native executor permissions remain enabled. Results are reviewable; approval does not
+perform external writes. A process watchdog survives a crashed wrapper.

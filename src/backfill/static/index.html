@@ -1,229 +1,335 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
-    <title>Backfill Control</title>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#f7f8f6" />
+    <title>Backfill</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
   </head>
   <body>
-    <div class="paper-grain" aria-hidden="true"></div>
-    <div class="app-shell">
-      <header class="masthead">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true">
-            <span></span><span></span><span></span>
-          </div>
-          <div>
-            <p class="eyebrow">Capacity dispatch / Devbox</p>
-            <h1>Backfill</h1>
-          </div>
-        </div>
-        <div class="masthead-actions">
-          <div class="owner-chip">
-            <span class="pulse-dot"></span>
-            <span id="owner-email">Authenticating…</span>
-          </div>
-          <button class="button button-primary" id="new-task-button">
-            <span>New job</span><kbd>N</kbd>
+    <div class="app">
+      <aside class="sidebar">
+        <a class="brand" href="#tasks"
+          ><span class="brand-symbol" aria-hidden="true">↗</span> Backfill</a
+        >
+        <nav aria-label="Main navigation">
+          <button class="nav active" data-view="tasks">
+            <span>Tasks</span><span class="count" id="task-count">0</span>
           </button>
+          <button class="nav" data-view="review">
+            <span>Review</span><span class="count" id="review-count">0</span>
+          </button>
+          <button class="nav" data-view="done"><span>Completed</span></button>
+        </nav>
+        <div class="project-nav">
+          <div class="sidebar-label">
+            Projects<button
+              class="icon"
+              id="new-project"
+              aria-label="New project"
+            >
+              +
+            </button>
+          </div>
+          <div id="project-links"></div>
         </div>
-      </header>
-
+        <div class="sidebar-bottom">
+          <button class="nav" data-view="settings">Settings</button>
+          <div class="host">
+            <span class="status-dot"></span><span id="host">Connecting</span>
+          </div>
+        </div>
+      </aside>
       <main>
-        <section class="hero">
-          <div>
-            <p class="section-index">Control room / 01</p>
-            <h2>Use the gaps.<br /><em>Keep the reserve.</em></h2>
+        <header class="topbar">
+          <span id="breadcrumb">Workspace / Tasks</span>
+          <div class="topbar-actions">
+            <button class="quiet" id="pause-all">Pause work</button
+            ><button class="primary" id="new-task">+ New task</button>
           </div>
-          <div class="hero-copy">
-            <p>
-              Backfill fits the highest-value job into the provider window that can finish it
-              without consuming your protected headroom.
-            </p>
-            <div class="scheduler-strip">
-              <div>
-                <span class="label">Scheduler</span>
-                <strong id="scheduler-state">Inspecting</strong>
-              </div>
-              <div>
-                <span class="label">Active runs</span>
-                <strong id="running-count">—</strong>
-              </div>
-              <div class="scheduler-actions">
-                <button class="button button-ghost" id="pause-button">Pause</button>
-                <button class="button button-signal" id="tick-button">Dispatch now</button>
-              </div>
-            </div>
-          </div>
+        </header>
+        <div id="notice" role="status" hidden></div>
+        <section id="login" hidden>
+          <h1>Reconnect your workspace</h1>
+          <p>
+            Open Backfill from its local dashboard command to restore your
+            private session.
+          </p>
+          <code>backfill dashboard</code>
         </section>
-
-        <section class="providers-section">
-          <div class="section-heading">
+        <div id="content" hidden>
+          <section class="hero">
             <div>
-              <p class="section-index">Provider lines / 02</p>
-              <h3>Available headroom</h3>
+              <div class="eyebrow" id="eyebrow">YOUR WORKSPACE</div>
+              <h1 id="page-title">Your work, moving forward.</h1>
+              <p id="page-description">
+                Leave the work here. Come back to the result.
+              </p>
             </div>
-            <button class="text-button" id="refresh-providers">Refresh signals ↻</button>
-          </div>
-          <div class="provider-grid" id="provider-grid">
-            <div class="loading-card">Waiting for provider signals…</div>
-          </div>
-        </section>
-
-        <div class="operations-grid">
-          <section class="queue-section">
-            <div class="section-heading">
-              <div>
-                <p class="section-index">Priority ledger / 03</p>
-                <h3>The backlog</h3>
-              </div>
-              <span class="count-badge" id="queue-count">0 jobs</span>
-            </div>
-            <div class="task-list" id="task-list">
-              <div class="empty-state">
-                <span>∅</span>
-                <p>No work is waiting in the yard.</p>
-              </div>
-            </div>
+            <div
+              class="capacity"
+              id="capacity"
+              aria-label="Available capacity"
+            ></div>
           </section>
-
-          <section class="runs-section">
-            <div class="section-heading">
-              <div>
-                <p class="section-index">Movement log / 04</p>
-                <h3>Recent runs</h3>
+          <section id="task-view">
+            <div class="toolbar">
+              <div class="tabs" role="group" aria-label="Task filter">
+                <button class="filter active" data-filter="all">All</button
+                ><button class="filter" data-filter="running">Running</button
+                ><button class="filter" data-filter="queued">Upcoming</button
+                ><button class="filter" data-filter="paused">Paused</button>
               </div>
+              <label class="search"
+                ><span aria-hidden="true">⌕</span
+                ><input
+                  type="search"
+                  id="search"
+                  placeholder="Find a task"
+                  aria-label="Find a task"
+              /></label>
             </div>
-            <div class="run-list" id="run-list">
-              <div class="empty-state compact">
-                <span>—</span>
-                <p>No runs recorded.</p>
-              </div>
-            </div>
+            <div id="task-list"></div>
           </section>
+          <section id="settings-view" hidden>
+            <div class="settings-grid">
+              <article class="settings-card">
+                <h2>Personal reserve</h2>
+                <p>Keep part of each account available for your own work.</p>
+                <form id="preferences-form">
+                  <label for="reserve"
+                    >Personal reserve
+                    <output id="reserve-value">30%</output></label
+                  ><input
+                    id="reserve"
+                    type="range"
+                    min="5"
+                    max="80"
+                    step="5"
+                    value="30"
+                  />
+                  <div class="range-ends">
+                    <span>More background work</span
+                    ><span>More room for you</span>
+                  </div>
+                  <button class="primary" type="submit">Save reserve</button>
+                </form>
+              </article>
+              <article class="settings-card">
+                <h2>Connected accounts</h2>
+                <div id="account-settings"></div>
+                <button class="quiet" id="refresh-meters">
+                  Refresh connections
+                </button>
+              </article>
+            </div>
+            <article class="settings-card below">
+              <h2>Project allowances</h2>
+              <p>
+                A shared ceiling for related tasks, applied to each account
+                separately.
+              </p>
+              <div id="project-settings"></div>
+            </article>
+            <details class="explanation">
+              <summary>How allowances work</summary>
+              <p>
+                Task and project allowances are percentages of each provider's
+                current quota window. Account movement during a run is charged
+                conservatively to that task, including other usage on the same
+                account. This is an estimate, not provider-reported task usage.
+              </p>
+              <p>
+                Backfill checks fresh account readings, protects your reserve,
+                and stops active work when the allowance is reached. A request
+                already in flight can overshoot. Interrupted work is saved.
+                Native permissions remain in effect.
+              </p>
+              <p>
+                One background task runs at a time. Repeated tasks wait for your
+                review before running again. Approving a result marks it
+                reviewed; it does not publish or deploy anything.
+              </p>
+            </details>
+          </section>
+          <footer>
+            <span id="footer-status">Waiting for connection</span
+            ><span>Private workspace</span>
+          </footer>
         </div>
       </main>
-
-      <footer>
-        <span>Backfill Control v0.1</span>
-        <span class="footer-rule"></span>
-        <span>Loopback origin · identity-aware edge</span>
-      </footer>
     </div>
-
     <dialog id="task-dialog">
       <form id="task-form">
         <div class="dialog-heading">
           <div>
-            <p class="section-index">Add to priority ledger</p>
-            <h3>Define a job</h3>
+            <span class="eyebrow">NEW TASK</span>
+            <h2 id="task-dialog-title">What needs doing?</h2>
           </div>
-          <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
+          <button type="button" class="icon close-dialog" aria-label="Close">
+            ×
+          </button>
         </div>
-
-        <label>
-          <span>Job title</span>
-          <input name="title" required minlength="3" maxlength="160" placeholder="Polish Shiplog setup flow" />
-        </label>
-
-        <label>
-          <span>Instructions</span>
-          <textarea
+        <label
+          >Task name<input
+            id="title"
+            name="title"
+            required
+            maxlength="160"
+            placeholder="Summarize my work this quarter" /></label
+        ><label
+          >Instructions<textarea
+            id="instructions"
             name="instructions"
-            required
-            minlength="10"
             rows="5"
-            placeholder="Inspect the current setup flow, reproduce rough edges, and make the smallest cohesive improvement…"
-          ></textarea>
-        </label>
-
-        <label>
-          <span>Definition of done</span>
-          <textarea
-            name="definition_of_done"
             required
-            minlength="3"
-            rows="3"
-            placeholder="Fresh install succeeds; existing tests pass; setup errors explain the next action."
+            placeholder="Describe the outcome you want, where to look, and how to check the result."
           ></textarea>
         </label>
-
-        <div class="field-pair">
-          <label>
-            <span>Repository path on Devbox</span>
-            <input name="repo_path" required placeholder="/home/bhushan/Code/shiplog" />
-          </label>
-          <label>
-            <span>Branch name</span>
-            <input name="branch_name" placeholder="shiplog-setup-polish" />
-          </label>
+        <div class="form-row">
+          <label
+            >Project<select id="project" name="project">
+              <option value="">No project</option>
+            </select></label
+          ><label
+            >Priority<select id="priority" name="priority">
+              <option value="low">Low · use spare capacity</option>
+              <option value="normal" selected>Normal</option>
+              <option value="high">High · run first</option>
+            </select></label
+          >
         </div>
-
-        <div class="field-grid">
-          <label>
-            <span>Priority</span>
-            <input name="priority" type="number" value="50" min="0" max="100" />
-          </label>
-          <label>
-            <span>Provider</span>
-            <select name="preferred_provider">
-              <option value="auto">Best fit</option>
-              <option value="codex">Codex</option>
-              <option value="claude">Claude</option>
-            </select>
-          </label>
-          <label>
-            <span>Estimated quota cost</span>
-            <div class="input-suffix">
-              <input name="estimated_cost_percent" type="number" value="10" min="1" max="100" />
-              <b>%</b>
-            </div>
-          </label>
-          <label>
-            <span>Runtime ceiling</span>
-            <div class="input-suffix">
-              <input name="max_runtime_minutes" type="number" value="60" min="5" max="720" />
-              <b>min</b>
-            </div>
-          </label>
-        </div>
-
-        <details>
-          <summary>Repository routing</summary>
-          <div class="field-pair inset-fields">
-            <label>
-              <span>Primary branch</span>
-              <input name="primary_branch" value="main" />
-            </label>
-            <label>
-              <span>Canonical remote</span>
-              <input name="upstream_remote" value="upstream" />
-            </label>
+        <details class="task-options">
+          <summary>Schedule & options</summary>
+          <div class="form-row">
+            <label
+              >Repeat<select id="schedule">
+                <option value="once">Don't repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select></label
+            ><label
+              >Start after<input type="datetime-local" id="scheduled_at"
+            /></label>
           </div>
+          <label
+            >Working folder<input
+              id="folder"
+              placeholder="Optional, on the execution host"
+            /><small
+              >Uses the project folder, or a private task folder.</small
+            ></label
+          >
+          <div class="form-row">
+            <label
+              >Account<select id="provider">
+                <option value="auto">Automatic</option>
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+              </select></label
+            ><label
+              >Allowance per window
+              <div class="suffix-input">
+                <input
+                  id="allowance"
+                  type="number"
+                  min="1"
+                  max="50"
+                  value="5"
+                  required
+                /><span>%</span>
+              </div></label
+            >
+          </div>
+          <label
+            >Permissions<select id="access">
+              <option value="read">Research & read files</option>
+              <option value="edit">Edit files using native permissions</option>
+            </select></label
+          ><label
+            >Source link<input
+              id="source_url"
+              type="url"
+              placeholder="Optional ticket or reference"
+          /></label>
         </details>
-
+        <div class="form-error" role="alert"></div>
         <div class="dialog-actions">
-          <button type="button" class="button button-ghost" data-close-dialog>Cancel</button>
-          <button class="button button-primary" type="submit">Add to backlog</button>
+          <button type="button" class="quiet close-dialog">Cancel</button
+          ><button type="submit" class="primary" id="create-task">
+            Queue task <span aria-hidden="true">↗</span>
+          </button>
         </div>
       </form>
     </dialog>
-
-    <dialog id="run-dialog">
-      <div class="dialog-heading">
-        <div>
-          <p class="section-index">Run transcript</p>
-          <h3 id="run-dialog-title">Movement log</h3>
+    <dialog id="project-dialog">
+      <form id="project-form">
+        <div class="dialog-heading">
+          <h2>New project</h2>
+          <button type="button" class="icon close-dialog" aria-label="Close">
+            ×
+          </button>
         </div>
-        <button type="button" class="icon-button" data-close-dialog aria-label="Close">×</button>
-      </div>
-      <pre id="run-events">Loading…</pre>
+        <label
+          >Project name<input
+            id="project-name"
+            required
+            maxlength="100"
+            placeholder="Work history" /></label
+        ><label
+          >Working folder<input
+            id="project-folder"
+            placeholder="Optional folder on this host" /></label
+        ><label
+          >Shared allowance per account
+          <div class="suffix-input">
+            <input
+              id="project-allowance"
+              type="number"
+              min="1"
+              max="50"
+              value="10"
+              required
+            /><span>%</span>
+          </div></label
+        >
+        <div class="form-error" role="alert"></div>
+        <div class="dialog-actions">
+          <button type="button" class="quiet close-dialog">Cancel</button
+          ><button type="submit" class="primary">Save project</button>
+        </div>
+      </form>
     </dialog>
-
-    <div id="toast" role="status" aria-live="polite"></div>
-    <script src="/app.js" defer></script>
+    <dialog id="detail-dialog" class="detail-dialog">
+      <div id="detail-content"></div>
+    </dialog>
+    <dialog id="pause-dialog">
+      <form id="pause-form">
+        <div class="dialog-heading">
+          <h2 id="pause-title">Pause background work</h2>
+          <button type="button" class="icon close-dialog" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <label
+          >Resume<select id="pause-duration">
+            <option value="86400">Tomorrow</option>
+            <option value="259200">In 3 days</option>
+            <option value="604800">In a week</option>
+            <option value="0">When I resume it</option>
+            <option value="custom">Choose a date</option>
+          </select></label
+        ><label id="pause-date-label" hidden
+          >Resume at<input id="pause-date" type="datetime-local"
+        /></label>
+        <div class="form-error" role="alert"></div>
+        <div class="dialog-actions">
+          <button type="button" class="quiet close-dialog">Cancel</button
+          ><button type="submit" class="primary">Pause</button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>

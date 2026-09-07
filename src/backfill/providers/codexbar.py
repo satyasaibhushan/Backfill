@@ -1,10 +1,10 @@
 import asyncio
 import json
 import shutil
-from datetime import UTC, datetime
 
 from backfill.config import Settings
-from backfill.providers.models import ProviderSnapshot, UsageWindow
+from backfill.providers.models import ProviderSnapshot, fingerprint, parse_window
+from backfill.providers.process import stop_probe
 
 
 class ClaudeCodexBarProvider:
@@ -19,45 +19,93 @@ class ClaudeCodexBarProvider:
                 provider_id=self.provider_id,
                 ready=False,
                 source="codexbar",
-                error=f"{self.settings.codexbar_command} is not installed",
+                error="quota reader is not installed",
             )
+        process = None
         try:
             async with asyncio.timeout(self.settings.provider_timeout_seconds):
+                source_args = (
+                    ["--source", self.settings.claude_quota_source]
+                    if self.settings.claude_quota_source is not None
+                    else []
+                )
                 process = await asyncio.create_subprocess_exec(
                     self.settings.codexbar_command,
                     "usage",
                     "--provider",
                     "claude",
-                    "--source",
-                    "cli",
+                    *source_args,
                     "--format",
                     "json",
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
                 )
-                stdout, stderr = await process.communicate()
-                if stdout:
-                    payload = json.loads(stdout)
-                    if process.returncode == 0:
-                        return self._parse(payload)
-                    try:
-                        return self._parse(payload)
-                    except RuntimeError as error:
-                        raise RuntimeError(str(error)) from error
+                stdout, _ = await process.communicate()
                 if process.returncode != 0:
-                    detail = stderr.decode(errors="replace").strip()[-1_000:]
-                    raise RuntimeError(detail or f"codexbar exited with {process.returncode}")
-                raise RuntimeError("codexbar returned no output")
-        except (TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as error:
+                    return ProviderSnapshot(
+                        provider_id=self.provider_id,
+                        ready=False,
+                        source="codexbar",
+                        error="Claude quota unavailable. Check the CodexBar login on this host.",
+                    )
+                payload = json.loads(stdout)
+                candidate = self._candidate(payload)
+                # The CLI usage screen can omit identity. Resolve it only from that
+                # same native CLI, never attach a CLI identity to a web reading.
+                if candidate.get("source") == "claude" and not self._account(candidate):
+                    candidate = {**candidate, "account": await self._cli_account()}
+                return self._parse(candidate)
+        except (
+            TimeoutError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OverflowError,
+            AttributeError,
+        ):
             return ProviderSnapshot(
                 provider_id=self.provider_id,
                 ready=False,
                 source="codexbar",
-                error=str(error) or "Claude quota probe timed out",
+                error="provider probe failed or returned incomplete quota data",
             )
+        finally:
+            if process:
+                await stop_probe(process)
 
-    def _parse(self, payload: object) -> ProviderSnapshot:
+    async def _cli_account(self) -> str:
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                self.settings.claude_command,
+                "auth",
+                "status",
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+            stdout, _ = await process.communicate()
+            value = json.loads(stdout)
+            if (
+                process.returncode != 0
+                or value.get("loggedIn") is not True
+                or value.get("authMethod") != "claude.ai"
+                or value.get("apiProvider") != "firstParty"
+                or not isinstance(value.get("email"), str)
+                or not value["email"].strip()
+            ):
+                raise ValueError("native subscription identity unavailable")
+            return value["email"]
+        finally:
+            if process:
+                await stop_probe(process)
+
+    @staticmethod
+    def _candidate(payload: object) -> dict:
         if isinstance(payload, list):
             candidate = next(
                 (
@@ -65,61 +113,48 @@ class ClaudeCodexBarProvider:
                     for item in payload
                     if isinstance(item, dict) and item.get("provider") == "claude"
                 ),
-                payload[0] if payload else {},
+                None,
             )
         else:
             candidate = payload
-        if not isinstance(candidate, dict):
-            raise RuntimeError("codexbar returned an invalid Claude payload")
-        if candidate.get("error"):
-            error = candidate["error"]
-            if isinstance(error, dict):
-                raise RuntimeError(str(error.get("message") or error))
-            raise RuntimeError(str(error))
-
-        usage = candidate.get("usage") or {}
-        windows: list[UsageWindow] = []
-        for name, key in (("session", "primary"), ("weekly", "secondary")):
-            value = usage.get(key)
-            if parsed := self._parse_window(name, value):
-                windows.append(parsed)
-        for value in usage.get("extraRateWindows") or []:
-            if isinstance(value, dict):
-                name = str(value.get("title") or value.get("id") or "extra")
-                if parsed := self._parse_window(name, value):
-                    windows.append(parsed)
-
-        return ProviderSnapshot(
-            provider_id=self.provider_id,
-            ready=bool(windows),
-            source=str(candidate.get("source") or "codexbar"),
-            account=candidate.get("account") or usage.get("accountEmail"),
-            plan=candidate.get("plan") or usage.get("loginMethod"),
-            windows=windows,
-            error=None if windows else "Claude account did not report quota windows",
-        )
+        if (
+            not isinstance(candidate, dict)
+            or candidate.get("error")
+            or candidate.get("provider") != "claude"
+        ):
+            raise ValueError("invalid provider payload")
+        return candidate
 
     @staticmethod
-    def _parse_window(name: str, value: object) -> UsageWindow | None:
-        if not isinstance(value, dict):
-            return None
-        if "usedPercent" in value:
-            used = float(value["usedPercent"])
-        elif "remainingPercent" in value:
-            used = 100 - float(value["remainingPercent"])
-        else:
-            return None
-        reset_value = value.get("resetsAt")
-        resets_at: datetime | None = None
-        if isinstance(reset_value, str):
-            resets_at = datetime.fromisoformat(reset_value.replace("Z", "+00:00"))
-        elif isinstance(reset_value, int | float):
-            resets_at = datetime.fromtimestamp(float(reset_value), tz=UTC)
-        duration = value.get("windowMinutes") or value.get("windowDurationMins")
-        return UsageWindow(
-            name=name,
-            used_percent=max(0, min(100, used)),
-            remaining_percent=max(0, min(100, 100 - used)),
-            window_minutes=int(duration) if isinstance(duration, int | float) else None,
-            resets_at=resets_at,
+    def _account(candidate: dict) -> object:
+        usage = candidate.get("usage") or {}
+        identity = usage.get("identity") or {}
+        return candidate.get("account") or usage.get("accountEmail") or identity.get("accountEmail")
+
+    def _parse(self, payload: object) -> ProviderSnapshot:
+        candidate = self._candidate(payload)
+        usage = candidate.get("usage") or {}
+        account = self._account(candidate)
+        windows = []
+        for name in ("primary", "secondary", "tertiary"):
+            if window := parse_window(name, usage.get(name)):
+                windows.append(window)
+        for index, value in enumerate(usage.get("extraRateWindows") or []):
+            if not isinstance(value, dict):
+                raise ValueError("invalid extra quota window")
+            # IDs are stable; titles can change with display localization.
+            name = f"extra.{value.get('id') or index}"
+            metric = value["window"] if "window" in value else value
+            if metric is None:
+                raise ValueError("missing extra quota window")
+            if window := parse_window(name, metric):
+                windows.append(window)
+        if not windows:
+            raise ValueError("no quota windows")
+        return ProviderSnapshot(
+            provider_id=self.provider_id,
+            ready=True,
+            source="codexbar",
+            account=fingerprint(self.provider_id, account),
+            windows=windows,
         )

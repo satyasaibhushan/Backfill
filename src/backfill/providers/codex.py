@@ -2,11 +2,11 @@ import asyncio
 import json
 import shutil
 from contextlib import suppress
-from datetime import UTC, datetime
 from typing import Any
 
 from backfill.config import Settings
-from backfill.providers.models import ProviderSnapshot, UsageWindow
+from backfill.providers.models import ProviderSnapshot, fingerprint, parse_window
+from backfill.providers.process import stop_probe
 
 
 class CodexRpcError(RuntimeError):
@@ -37,11 +37,12 @@ class CodexProvider:
                     "-s",
                     "read-only",
                     "-a",
-                    "untrusted",
+                    "on-request",
                     "app-server",
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
                 )
                 if process.stderr:
                     stderr_task = asyncio.create_task(process.stderr.read())
@@ -54,7 +55,7 @@ class CodexProvider:
                             "clientInfo": {
                                 "name": "backfill",
                                 "title": "Backfill",
-                                "version": "0.1.0",
+                                "version": "0.2.0",
                             }
                         },
                     },
@@ -69,21 +70,24 @@ class CodexProvider:
                 await self._send(process, {"method": "account/rateLimits/read", "id": 3})
                 limit_result = await self._read_response(process, 3)
                 return self._parse(account_result, limit_result)
-        except (TimeoutError, OSError, CodexRpcError, json.JSONDecodeError) as error:
+        except (
+            TimeoutError,
+            OSError,
+            CodexRpcError,
+            ValueError,
+            TypeError,
+            OverflowError,
+            AttributeError,
+        ):
             return ProviderSnapshot(
                 provider_id=self.provider_id,
                 ready=False,
                 source="codex-app-server",
-                error=str(error),
+                error="provider probe failed or returned incomplete quota data",
             )
         finally:
-            if process and process.returncode is None:
-                process.terminate()
-                with suppress(TimeoutError):
-                    await asyncio.wait_for(process.wait(), timeout=2)
-                if process.returncode is None:
-                    process.kill()
-                    await process.wait()
+            if process:
+                await stop_probe(process)
             if stderr_task:
                 stderr_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -117,48 +121,28 @@ class CodexProvider:
         self, account_result: dict[str, Any], limit_result: dict[str, Any]
     ) -> ProviderSnapshot:
         account = account_result.get("account") or {}
-        rate_limits = limit_result.get("rateLimits") or {}
-        windows: list[UsageWindow] = []
-        for fallback_name, key in (("session", "primary"), ("weekly", "secondary")):
-            value = rate_limits.get(key)
-            name = self._window_name(fallback_name, value)
-            if parsed := self._parse_window(name, value):
-                windows.append(parsed)
+        identity = fingerprint(self.provider_id, account.get("email"))
+        buckets = limit_result.get("rateLimitsByLimitId")
+        if buckets is None:
+            buckets = {"default": limit_result.get("rateLimits")}
+        if not isinstance(buckets, dict) or not buckets:
+            raise ValueError("missing quota buckets")
+        windows = []
+        for bucket, limits in buckets.items():
+            if not isinstance(limits, dict):
+                raise ValueError("invalid quota bucket")
+            found = []
+            for slot in ("primary", "secondary"):
+                window = parse_window(f"{bucket}.{slot}", limits.get(slot))
+                if window:
+                    found.append(window)
+            if not found:
+                raise ValueError("quota bucket has no readable windows")
+            windows.extend(found)
         return ProviderSnapshot(
             provider_id=self.provider_id,
-            ready=bool(windows),
+            ready=True,
             source="codex-app-server",
-            account=account.get("email"),
-            plan=account.get("planType"),
+            account=identity,
             windows=windows,
-            error=None if windows else "Codex account did not report subscription rate limits",
-        )
-
-    @staticmethod
-    def _window_name(fallback_name: str, value: object) -> str:
-        if not isinstance(value, dict):
-            return fallback_name
-        duration = value.get("windowDurationMins")
-        if isinstance(duration, int | float):
-            return "session" if duration <= 1_440 else "weekly"
-        return fallback_name
-
-    @staticmethod
-    def _parse_window(name: str, value: object) -> UsageWindow | None:
-        if not isinstance(value, dict):
-            return None
-        used = float(value.get("usedPercent", 0))
-        reset_value = value.get("resetsAt")
-        resets_at = (
-            datetime.fromtimestamp(float(reset_value), tz=UTC)
-            if isinstance(reset_value, int | float)
-            else None
-        )
-        duration = value.get("windowDurationMins")
-        return UsageWindow(
-            name=name,
-            used_percent=max(0, min(100, used)),
-            remaining_percent=max(0, min(100, 100 - used)),
-            window_minutes=int(duration) if isinstance(duration, int | float) else None,
-            resets_at=resets_at,
         )

@@ -1,75 +1,43 @@
-from typing import Annotated
-
-from fastapi import Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel
-
-from backfill.config import Settings
+import os
+import secrets
+import stat
+from pathlib import Path
 
 
-class Identity(BaseModel):
-    login: str
+def private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError("data directory must be a real directory owned by the current user")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise RuntimeError("data directory must have mode 0700")
 
 
-def _is_loopback(request: Request) -> bool:
-    client_host = request.client.host if request.client else ""
-    return client_host in {"127.0.0.1", "::1", "localhost", "testclient"}
+def read_secret(path: Path) -> str:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise RuntimeError("credential must be a regular file owned by the current user")
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            raise RuntimeError("credential file must have mode 0600")
+        value = stream.read().strip()
+    if len(value) < 32:
+        raise RuntimeError("invalid credential file")
+    return value
 
 
-def require_identity(
-    request: Request,
-    tailscale_login: Annotated[str | None, Header(alias="Tailscale-User-Login")] = None,
-) -> Identity:
-    settings: Settings = request.app.state.settings
-    if not settings.auth_configured:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Backfill authentication is not configured",
-        )
-    if settings.auth_mode == "dev":
-        if not _is_loopback(request):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Development authentication is loopback-only",
-            )
-        identity = Identity(login=settings.allowed_login or "")
-    else:
-        if not tailscale_login:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Tailscale Serve identity is required",
-            )
-        identity = Identity(login=tailscale_login.strip().lower())
-
-    if identity.login != settings.allowed_login:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tailscale login is not allowed",
-        )
-    return identity
+def write_secret(path: Path, value: str) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(value + "\n")
 
 
-IdentityDep = Annotated[Identity, Depends(require_identity)]
-
-
-def require_dashboard_mutation(
-    request: Request,
-    identity: IdentityDep,
-    request_source: Annotated[str | None, Header(alias="X-Backfill-Request")] = None,
-    origin: Annotated[str | None, Header()] = None,
-) -> Identity:
-    settings: Settings = request.app.state.settings
-    if settings.auth_mode == "tailscale":
-        if request_source != "dashboard":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Missing request marker",
-            )
-        if not settings.public_origin or origin != settings.public_origin.rstrip("/"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid request origin",
-            )
-    return identity
-
-
-MutationIdentityDep = Annotated[Identity, Depends(require_dashboard_mutation)]
+def owner_token(root: Path) -> str:
+    private_directory(root)
+    path = root / "owner.token"
+    try:
+        write_secret(path, secrets.token_urlsafe(32))
+    except FileExistsError:
+        pass
+    return read_secret(path)
