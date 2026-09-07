@@ -263,18 +263,20 @@ function renderList() {
         : view === "done"
           ? [
               "↗",
-              "A little more room in your day.",
+              "No completed tasks yet.",
               "Approved results will stay here for later.",
             ]
           : filter !== "all" || q
             ? ["⌕", "No matching tasks.", "Try another filter or search."]
             : [
                 "↗",
-                "What can we take off your plate?",
-                "Give it a clear outcome. Backfill handles the timing and brings the result back to you.",
+                data.tasks.length ? "No queued work." : "Add your first task.",
+                data.tasks.length
+                  ? "Results waiting for you are in Review."
+                  : "Write the instructions and choose when it should run.",
               ];
     $("#task-list").innerHTML =
-      `<div class="empty"><div class="empty-symbol" aria-hidden="true">${empty[0]}</div><h2>${empty[1]}</h2><p>${empty[2]}</p>${view === "tasks" && filter === "all" && !q ? '<button class="primary" id="empty-new">Create your first task ↗</button><div class="suggestions"><button class="suggestion" data-template="history">Summarize a project</button><button class="suggestion" data-template="review">Review recent changes</button><button class="suggestion" data-template="research">Research a question</button></div>' : ""}</div>`;
+      `<div class="empty"><div class="empty-symbol" aria-hidden="true">${empty[0]}</div><h2>${empty[1]}</h2><p>${empty[2]}</p>${view === "tasks" && filter === "all" && !q ? '<button class="primary" id="empty-new">New task ↗</button><div class="suggestions"><button class="suggestion" data-template="history">Summarize a project</button><button class="suggestion" data-template="review">Review recent changes</button><button class="suggestion" data-template="research">Research a question</button></div>' : ""}</div>`;
     $("#empty-new")?.addEventListener("click", () => newTask());
     $$("[data-template]").forEach(
       (b) => (b.onclick = () => newTask(b.dataset.template)),

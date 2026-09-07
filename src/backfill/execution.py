@@ -213,7 +213,7 @@ class Execution:
                         elif event.get("method") == "item/completed":
                             item = event.get("params", {}).get("item", {})
                             if item.get("type") == "agentMessage":
-                                output += "\n\n" + item.get("text", "")
+                                output = item.get("text", "")
                         elif event.get("method") == "turn/completed":
                             native_error = (
                                 event.get("params", {}).get("turn", {}).get("status") != "completed"

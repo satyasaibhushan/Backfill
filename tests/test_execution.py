@@ -73,6 +73,8 @@ else:
             emit({{"id":event["id"],"result":{{"turn":{{"id":"turn-one"}}}}}})
             emit({{"method":"turn/started","params":{{"threadId":"thread-one"}}}})
             emit({{"method":"thread/tokenUsage/updated","params":{{"threadId":"thread-one","tokenUsage":{{"total":{{"totalTokens":30}}}}}}}})
+            progress="Progress chatter"
+            emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":progress}}}}}})
             emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":text}}}}}})
             emit({{"method":"turn/completed","params":{{"threadId":"thread-one","turn":{{"status":"completed"}}}}}})
 """)
@@ -130,6 +132,7 @@ else:
                         time.sleep(0.15)
                     assert task["state"] == "review", task
                     assert "Verified result" in task["output"]
+                    assert "Progress chatter" not in task["output"]
                     if attempt == 0:
                         assert (
                             client.post(
