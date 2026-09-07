@@ -45,3 +45,35 @@ def test_model_quota_does_not_replace_account_weekly_quota():
         ("Weekly", 90),
         ("Fable weekly", 30),
     ]
+
+
+def test_rejection_states_do_not_call_every_failure_missing_data():
+    from backfill.quota_display import quota_status
+
+    current = {"windows": [window("primary", 18000)]}
+    accepted = {
+        "windows": [window("primary", 18000), window("extra.claude-weekly-scoped-fable", 604800)]
+    }
+    assert quota_status(True, "observation omitted a known quota window", current, accepted) == {
+        "code": "missing_window",
+        "label": "Fable quota unavailable",
+    }
+    assert quota_status(False, "Reader unavailable", None, accepted)["code"] == "unavailable"
+    assert quota_status(True, "window contract changed", current, accepted)["code"] == "rejected"
+    current["windows"][0]["used"] = 100
+    assert quota_status(True, None, current, accepted)["code"] == "exhausted"
+
+
+def test_usage_drop_before_reset_is_inconsistent_not_reset_pending():
+    from backfill.quota_display import quota_status
+
+    current = {
+        "windows": [window("primary", 18000, 2)],
+        "observed_at": "2026-09-13T23:00:00Z",
+        "covered_through": "2026-09-13T22:58:00Z",
+    }
+    accepted = {"windows": [window("primary", 18000, 3)]}
+    assert quota_status(True, "usage decreased before reset", current, accepted) == {
+        "code": "inconsistent",
+        "label": "Quota readings disagree",
+    }

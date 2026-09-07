@@ -38,3 +38,40 @@ def display_windows(provider: str, windows: list[dict]) -> list[dict]:
     if provider == "claude" and "Fable weekly" not in groups:
         groups["Fable weekly"] = {"label": "Fable weekly", "remaining": None, "resets_at": None}
     return list(groups.values())
+
+
+def quota_status(
+    connected: bool, error: str | None, observed: dict | None, accepted: dict | None
+) -> dict:
+    from datetime import datetime
+
+    if not connected:
+        return {"code": "unavailable", "label": "Quota reading unavailable"}
+    windows = {w["name"]: w for w in observed["windows"]} if observed else {}
+    previous = {w["name"]: w for w in accepted["windows"]} if accepted else {}
+    if error == "observation omitted a known quota window":
+        missing = previous.keys() - windows.keys()
+        label = "Fable quota unavailable" if FABLE_WINDOW in missing else "Quota reading incomplete"
+        return {"code": "missing_window", "label": label}
+    if error in {"usage decreased before a confirmed reset", "usage decreased before reset"}:
+        # A reset is pending only when it has happened at the provider but the
+        # conservative coverage timestamp still precedes it. Other drops disagree.
+        if observed:
+            observed_at = datetime.fromisoformat(observed["observed_at"])
+            covered = datetime.fromisoformat(observed["covered_through"])
+            for name, old in previous.items():
+                current = windows.get(name)
+                reset = datetime.fromisoformat(old["resets_at"])
+                if (
+                    current
+                    and current["used"] < old["used"]
+                    and covered < reset <= observed_at
+                    and datetime.fromisoformat(current["resets_at"]) > reset
+                ):
+                    return {"code": "reset_pending", "label": "Waiting for reset confirmation"}
+        return {"code": "inconsistent", "label": "Quota readings disagree"}
+    if error:
+        return {"code": "rejected", "label": "Quota check failed"}
+    if any(w["used"] >= w["limit"] for w in windows.values()):
+        return {"code": "exhausted", "label": "Quota exhausted"}
+    return {"code": "ready", "label": ""}

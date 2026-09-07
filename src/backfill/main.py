@@ -19,7 +19,7 @@ from backfill.execution import Execution
 from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.quota import QuotaError, QuotaService
-from backfill.quota_display import display_windows
+from backfill.quota_display import display_windows, quota_status
 from backfill.schemas import (
     AccountInput,
     Acquire,
@@ -263,15 +263,18 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
                 or time.time() - datetime.fromisoformat(obs["observed_at"]).timestamp()
                 > account["policy"]["snapshot_ttl_seconds"]
             )
+            connected = bool(
+                not stale
+                and identity_matches
+                and not (reading["error"] if reading else meter["error"])
+            )
+            status = quota_status(connected, meter["error"], obs, account["observation"])
             accounts.append(
                 {
                     "provider": meter["provider"],
-                    "connected": bool(
-                        not stale
-                        and identity_matches
-                        and not (reading["error"] if reading else meter["error"])
-                    ),
-                    "execution_ready": not stale and not meter["error"],
+                    "connected": connected,
+                    "execution_ready": connected and not meter["error"],
+                    "status": status,
                     "windows": groups,
                     "checked_at": meter["checked_at"],
                 }

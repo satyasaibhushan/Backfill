@@ -192,3 +192,75 @@ def test_model_quota_is_separate_and_missing_reading_stays_held(tmp_path, monkey
         include_model[0] = True
         client.portal.call(app.state.meter.refresh)
         assert accounts()["claude"]["execution_ready"] is True
+
+
+def test_reset_confirmation_state_clears_after_coverage_passes_reset(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from backfill.auth import read_secret
+    from backfill.main import create_app
+
+    now = datetime.now(UTC)
+    reset = now - timedelta(seconds=10)
+    stage = [0]
+    times = [now - timedelta(seconds=200), now, now + timedelta(seconds=121)]
+    settings = Settings(data_dir=tmp_path, automation_enabled=False, meter_enabled=False)
+
+    async def read(provider, settings):
+        observed = times[stage[0]]
+        windows = [
+            Window(
+                name="primary",
+                unit="quota_points",
+                limit=100,
+                used=3 if stage[0] == 0 else 0,
+                resets_at=reset if stage[0] == 0 else reset + timedelta(hours=5),
+                duration_seconds=18000,
+            )
+        ]
+        if provider == "claude":
+            windows.append(
+                Window(
+                    name="extra.claude-weekly-scoped-fable",
+                    unit="quota_points",
+                    limit=100,
+                    used=0,
+                    resets_at=now + timedelta(days=5),
+                    duration_seconds=604800,
+                )
+            )
+        return Observation(
+            observed_at=observed,
+            covered_through=observed - timedelta(seconds=120),
+            source="fixture",
+            source_account=provider,
+            measurement="estimated",
+            windows=windows,
+        )
+
+    monkeypatch.setattr("backfill.meter.probe", read)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        app.state.meter.defaults()
+        app.state.quota.clock = lambda: times[stage[0]].timestamp()
+        headers = {"Authorization": "Bearer " + read_secret(settings.root / "owner.token")}
+        client.portal.call(app.state.meter.refresh)
+        stage[0] = 1
+        client.portal.call(app.state.meter.refresh)
+        accounts = client.get("/v2/overview", headers=headers).json()["accounts"]
+        assert len(accounts) == 2
+        for account in accounts:
+            assert account["connected"] is True
+            assert account["execution_ready"] is False
+            assert account["windows"][0]["remaining"] == 100
+            assert account["status"] == {
+                "code": "reset_pending",
+                "label": "Waiting for reset confirmation",
+            }
+        stage[0] = 2
+        client.portal.call(app.state.meter.refresh)
+        for account in client.get("/v2/overview", headers=headers).json()["accounts"]:
+            assert account["execution_ready"] is True
+            assert account["status"] == {"code": "ready", "label": ""}

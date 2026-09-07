@@ -226,7 +226,7 @@ function render() {
                 )
                 .join(
                   "",
-                )}${a.execution_ready || a.windows.some((w) => w.label === "Fable weekly" && w.remaining === null) ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Incomplete quota data</span>'}`
+                )}${a.status?.label ? `<span class="account-unavailable" data-quota-status="${esc(a.status.code)}">${esc(a.status.label)}</span>` : ""}`
             : '<span class="account-unavailable">Capacity unavailable</span>'
         }</div>`,
     )
@@ -616,7 +616,7 @@ function renderSettings() {
   $("#account-settings").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="connection"><span>${accountName(a.provider)}</span><small>${a.connected ? (a.execution_ready ? "Connected" : "Connected · incomplete quota data") : "Quota reading unavailable"}</small></div>`,
+        `<div class="connection"><span>${accountName(a.provider)}</span><small>${esc(a.status?.label || (a.connected ? "Connected" : "Quota reading unavailable"))}</small></div>`,
     )
     .join("");
   $("#project-settings").innerHTML = data.projects.length
