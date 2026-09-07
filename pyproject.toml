@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn>=0.40.0",
     "httpx>=0.28.0",
     "pydantic-settings>=2.11.0",
+    "sqlalchemy>=2.0.43",
+    "psycopg[binary]>=3.2.10",
 ]
 
 [project.scripts]

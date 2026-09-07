@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     codexbar_command: str = "codexbar"
     claude_command: str = "claude"
     claude_quota_source: Literal["auto", "oauth", "cli", "web"] | None = None
+    hosted_worker: bool = False
     automation_enabled: bool = True
     meter_enabled: bool = True
     meter_interval_seconds: int = Field(default=45, ge=5, le=120)

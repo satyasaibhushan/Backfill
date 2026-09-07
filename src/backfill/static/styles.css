@@ -1093,3 +1093,72 @@ body.modal-open {
   padding: 0;
   line-height: 1;
 }
+
+.signin-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+.signin-card {
+  width: min(100%, 400px);
+  padding: 36px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.signin-card h1 {
+  margin-top: 36px;
+  font-size: 30px;
+}
+.signin-card p {
+  color: var(--muted);
+  margin: 12px 0 24px;
+}
+.signin-card button {
+  width: 100%;
+}
+.machine-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.machine-bar small {
+  display: block;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.machine-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pair-dialog {
+  max-width: 600px;
+  padding: 32px;
+}
+.pair-dialog p {
+  color: var(--muted);
+  margin: 16px 0;
+}
+.pair-dialog textarea {
+  font-family: monospace;
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+@media (max-width: 600px) {
+  .machine-bar {
+    align-items: start;
+    flex-direction: column;
+  }
+  .machine-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

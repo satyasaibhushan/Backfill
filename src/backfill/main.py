@@ -286,6 +286,14 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
             "execution_enabled": settings.automation_enabled,
         }
 
+    @app.post("/v1/relay/command", dependencies=owned)
+    def relay_command(value: dict, request: Request) -> dict:
+        from backfill.relay import apply_command
+
+        if not isinstance(value.get("id"), str) or not isinstance(value.get("payload"), dict):
+            raise QuotaError("Invalid command", 422)
+        return apply_command(request.app.state.tasks, value)
+
     @app.post("/v2/tasks", dependencies=owned, status_code=201)
     def create_task(value: TaskInput, request: Request) -> dict:
         return request.app.state.tasks.create(value)

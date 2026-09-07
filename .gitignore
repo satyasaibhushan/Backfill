@@ -10,3 +10,9 @@ __pycache__/
 dist/
 *.token
 *.sock
+
+.vercel/
+.env.*
+build/
+
+src/backfill/worker.whl

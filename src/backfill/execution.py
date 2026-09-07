@@ -30,6 +30,13 @@ class Execution:
             await asyncio.sleep(2)
 
     async def tick(self) -> None:
+        if self.tasks.settings.hosted_worker:
+            try:
+                seen = float((self.tasks.settings.root / "connection.seen").read_text())
+                if not 0 <= self.tasks.quota.clock() - seen < 45:
+                    return
+            except (OSError, ValueError):
+                return
         self.active = {key: task for key, task in self.active.items() if not task.done()}
         if self.active:
             return

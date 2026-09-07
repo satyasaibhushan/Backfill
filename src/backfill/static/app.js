@@ -57,12 +57,21 @@ let data = null,
 async function api(path, method = "GET", body) {
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(window.backfillCloud && method !== "GET"
+        ? { "Idempotency-Key": crypto.randomUUID() }
+        : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json();
   if (!response.ok) {
     if (response.status === 401) {
+      if (window.backfillCloud) {
+        location.replace("/");
+        throw Error("Sign in to continue");
+      }
       $("#content").hidden = true;
       $("#login").hidden = false;
     }
@@ -73,7 +82,9 @@ async function api(path, method = "GET", body) {
           : "Could not save. Try again."),
     );
   }
-  return value;
+  return window.backfillCloud && value.command_id
+    ? window.cloudCommand(value)
+    : value;
 }
 let noticeTimer;
 function notice(message, error = false) {
@@ -240,7 +251,9 @@ function render() {
       ? "Working on " + running + " task"
       : data.execution_enabled
         ? "Ready when capacity is available"
-        : "Execution is disabled on this host";
+        : window.backfillCloud
+          ? "Connect a machine to start"
+          : "Execution is disabled on this host";
   renderList();
   renderSettings();
 }
@@ -304,7 +317,7 @@ function renderList() {
                 data.tasks.length ? "No queued work." : "Add your first task.",
                 data.tasks.length
                   ? "Results waiting for you are in Review."
-                  : "Write the instructions and choose when it should run.",
+                  : "Describe the work. Your machine handles the rest.",
               ];
     $("#task-list").innerHTML =
       `<div class="empty"><div class="empty-symbol" aria-hidden="true">${icon(empty[0] === "✓" ? "check" : empty[0] === "⌕" ? "search" : "arrow")}</div><h2>${empty[1]}</h2><p>${empty[2]}</p>${view === "tasks" && filter === "all" && !q ? '<button class="primary" id="empty-new">New task ↗</button><div class="suggestions"><button class="suggestion" data-template="history">Summarize a project</button><button class="suggestion" data-template="review">Review recent changes</button><button class="suggestion" data-template="research">Research a question</button></div>' : ""}</div>`;
@@ -658,7 +671,11 @@ $("#refresh-meters").onclick = async (e) => {
   try {
     await api("/v1/meters/refresh", "POST", {});
     await refresh();
-    notice("Account connections refreshed.");
+    notice(
+      window.backfillCloud
+        ? "The worker refreshes readings automatically."
+        : "Account connections refreshed.",
+    );
   } catch (err) {
     notice(err.message, true);
   } finally {

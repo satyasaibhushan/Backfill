@@ -44,6 +44,11 @@ def parser() -> argparse.ArgumentParser:
         "--credential", type=Path, help="worker token file; defaults to local owner token"
     )
     commands = cli.add_subparsers(dest="command", required=True)
+    connection = commands.add_parser("connect", help="pair this machine with the website")
+    connection.add_argument("--server", required=True)
+    connection.add_argument("--code", required=True)
+    connection.add_argument("--install", action="store_true")
+    commands.add_parser("worker", help="maintain the outbound website connection")
     commands.add_parser("init", help="create private owner credential and data directory")
     commands.add_parser("serve", help="serve quota API on a private Unix socket")
     dashboard = commands.add_parser("dashboard", help="open the authenticated local dashboard")
@@ -85,6 +90,18 @@ def run(args: argparse.Namespace) -> int:
     settings = load_settings()
     if args.data_dir:
         settings.data_dir = args.data_dir
+    if args.command == "connect":
+        from backfill.worker import connect
+
+        emit(connect(settings.root, args.server, args.code, args.install))
+        return 0
+    if args.command == "worker":
+        from backfill.worker import Worker
+
+        with (settings.root / "connection.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            asyncio.run(Worker(settings.root).run())
+        return 0
     if args.command == "demo":
         from backfill.demo import run_demo
 

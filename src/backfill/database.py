@@ -1,6 +1,7 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 SCHEMA = """
@@ -63,6 +64,9 @@ CREATE INDEX IF NOT EXISTS native_runs_workload ON native_runs(workload, state);
 class Database:
     def __init__(self, path: Path):
         self.path = path
+        self._active: ContextVar[sqlite3.Connection | None] = ContextVar(
+            "transaction", default=None
+        )
         with self.transaction() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version not in (0, 1, 2):
@@ -71,7 +75,20 @@ class Database:
             connection.execute("PRAGMA user_version=2")
 
     @contextmanager
+    def atomic(self) -> Iterator[sqlite3.Connection]:
+        with self.transaction() as connection:
+            token = self._active.set(connection)
+            try:
+                yield connection
+            finally:
+                self._active.reset(token)
+
+    @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        active = self._active.get()
+        if active is not None:
+            yield active
+            return
         connection = sqlite3.connect(self.path, timeout=15)
         connection.row_factory = sqlite3.Row
         try:

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sign in · Backfill</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/cloud-login.js" defer></script>
+  </head>
+  <body class="signin-page">
+    <main class="signin-card">
+      <a class="brand" href="/">Backfill</a>
+      <h1 id="signin-title">Welcome back.</h1>
+      <p id="signin-description">Sign in to your workspace.</p>
+      <form id="signin-form">
+        <label
+          >Password<input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            autofocus
+            maxlength="512"
+        /></label>
+        <p class="form-error" id="signin-error" role="alert"></p>
+        <button class="primary" id="signin-submit" type="submit">
+          Sign in
+        </button>
+      </form>
+    </main>
+  </body>
+</html>

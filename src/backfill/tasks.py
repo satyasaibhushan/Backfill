@@ -1,5 +1,7 @@
 """Durable task queue. Execution and account metering remain separate modules."""
 
+from __future__ import annotations
+
 import json
 import secrets
 from datetime import datetime
