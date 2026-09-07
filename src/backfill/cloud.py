@@ -351,6 +351,13 @@ def create_cloud_app(
         return {
             "commands": [{"id": c["id"], "payload": json.loads(c["payload"])} for c in commands],
             "interval": 10,
+            "app_connections": db().rows(
+                (
+                    "SELECT id,project,hash,revoked FROM app_connections WHERE "
+                    "machine=:machine AND hash IS NOT NULL"
+                ),
+                machine=worker["id"],
+            ),
         }
 
     def snapshot():
@@ -447,4 +454,7 @@ def create_cloud_app(
             raise HTTPException(503, "Worker package not available")
         return FileResponse(path, media_type="application/octet-stream")
 
+    from backfill.cloud_apps import install
+
+    install(app, db, owner, site)
     return app

@@ -150,3 +150,57 @@ def test_cross_origin_unknown_commands_and_unauthenticated_access(cloud):
 def test_worker_snapshot_requires_credential(cloud):
     client, _, _ = cloud
     assert client.post("/cloud/sync", json={"snapshot": {}, "responses": []}).status_code == 401
+
+
+def test_project_connection_pairing_scope_and_revocation(cloud):
+    import shlex
+
+    client, store, _ = cloud
+    code = pairing(client)
+    credential = secrets.token_urlsafe(40)
+    machine = client.post(
+        "/cloud/pair", json={"code": code, "credential": credential, "name": "worker"}
+    ).json()
+    snapshot = {
+        "overview": {"projects": [{"id": "project-one", "name": "Research", "allowance": 20}]}
+    }
+    worker_headers = {"Authorization": "Bearer " + credential}
+    client.post("/cloud/sync", json={"snapshot": snapshot, "responses": []}, headers=worker_headers)
+    assert (
+        client.post("/cloud/projects/missing/connections", json={"name": "Application"}).status_code
+        == 404
+    )
+    connection = client.post(
+        "/cloud/projects/project-one/connections", json={"name": "Application"}
+    )
+    assert connection.status_code == 200, connection.text
+    value = connection.json()
+    code = shlex.split(value["command"])[-1]
+    application_secret = secrets.token_urlsafe(40)
+    payload = {"code": code, "credential": application_secret}
+    paired = client.post("/cloud/apps/redeem", json=payload)
+    assert paired.status_code == 200, paired.text
+    assert paired.json()["project"] == "project-one"
+    assert client.post("/cloud/apps/redeem", json=payload).json() == paired.json()
+    assert (
+        client.post(
+            "/cloud/apps/redeem", json={**payload, "credential": secrets.token_urlsafe(40)}
+        ).status_code
+        == 401
+    )
+    sync = client.post(
+        "/cloud/sync", json={"snapshot": snapshot, "responses": []}, headers=worker_headers
+    ).json()
+    assert sync["app_connections"][0]["hash"] == digest(application_secret)
+    assert (
+        client.delete("/cloud/projects/project-one/connections/" + value["id"]).status_code == 200
+    )
+    sync = client.post(
+        "/cloud/sync", json={"snapshot": snapshot, "responses": []}, headers=worker_headers
+    ).json()
+    assert sync["app_connections"][0]["revoked"] == 1
+    assert (
+        store.one("SELECT hash FROM app_connections WHERE id=:id", id=value["id"])["hash"]
+        != application_secret
+    )
+    assert machine["id"]

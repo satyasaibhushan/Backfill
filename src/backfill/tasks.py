@@ -88,6 +88,9 @@ class Tasks:
         self.settings = settings
         with quota.database.transaction() as db:
             db.executescript(SCHEMA)
+            from backfill.external import SCHEMA as external_schema
+
+            db.executescript(external_schema)
             db.execute(
                 "INSERT OR IGNORE INTO app_preferences VALUES (1,?)",
                 (Preferences().model_dump_json(),),
@@ -434,7 +437,12 @@ class Tasks:
                 (now,),
             )
             rows = db.execute(
-                "SELECT * FROM jobs WHERE state IN ('queued','waiting') AND due<=?", (now,)
+                (
+                    "SELECT * FROM jobs WHERE state IN ('queued','waiting') AND "
+                    "due<=? AND NOT EXISTS (SELECT 1 FROM external_jobs WHERE "
+                    "external_jobs.job=jobs.id)"
+                ),
+                (now,),
             ).fetchall()
         return sorted(
             (self.public(r) for r in rows),

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -9,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from backfill.auth import owner_token
+from backfill.auth import owner_token, write_secret
 from backfill.config import Settings
 from backfill.database import Database
 from backfill.meter import Meter
@@ -17,9 +19,10 @@ from backfill.quota import QuotaService
 from backfill.schemas import Observation, Window
 
 
+@pytest.mark.parametrize("external", [False, True])
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 @pytest.mark.parametrize("access", ["read", "edit"])
-def test_submit_execute_review_and_revise_through_actual_guard(provider, access):
+def test_submit_execute_review_and_revise_through_actual_guard(provider, access, external):
     with tempfile.TemporaryDirectory(prefix="task-", dir="/tmp") as directory:
         root = Path(directory)
         token = owner_token(root)
@@ -121,6 +124,69 @@ else:
                         pass
                     assert server.poll() is None and time.monotonic() < deadline
                     time.sleep(0.05)
+                if external:
+                    project = client.post(
+                        "/v2/projects", json={"name": "External project", "allowance": 20}
+                    ).json()
+                    credential = "test-external-credential"
+                    grant = {
+                        "id": "test-app",
+                        "project": project["id"],
+                        "hash": hashlib.sha256(credential.encode()).hexdigest(),
+                        "revoked": 0,
+                    }
+                    assert client.put("/v2/app-grants", json=[grant]).status_code == 200
+                    connection = root / "connection.json"
+                    write_secret(
+                        connection,
+                        json.dumps({"id": "test-app", "credential": credential, "root": directory}),
+                    )
+                    request = {
+                        "request_id": "request-one",
+                        "task": {
+                            "title": "Inspect files",
+                            "instructions": "Review seven files",
+                            "access": access,
+                            "provider": provider,
+                            "folder": directory,
+                        },
+                    }
+                    args = [
+                        sys.executable,
+                        "-m",
+                        "backfill.cli",
+                        "run-app",
+                        "--connection",
+                        str(connection),
+                    ]
+                    result = subprocess.run(
+                        args,
+                        input=json.dumps(request),
+                        text=True,
+                        capture_output=True,
+                        env=env,
+                        timeout=20,
+                    )
+                    assert result.returncode == 0, result.stderr + result.stdout
+                    final = json.loads(result.stdout.strip().splitlines()[-1])
+                    assert final["state"] == "review", final
+                    assert "Verified result" in final["output"]
+                    retry = subprocess.run(
+                        args,
+                        input=json.dumps(request),
+                        text=True,
+                        capture_output=True,
+                        env=env,
+                        timeout=10,
+                    )
+                    assert retry.returncode == 0, retry.stderr
+                    assert (
+                        json.loads(retry.stdout.strip().splitlines()[-1])["task_id"]
+                        == final["task_id"]
+                    )
+                    record = client.get("/v2/tasks/" + final["task_id"]).json()
+                    assert len(record["attempts"]) == 1
+                    return
                 result = client.post(
                     "/v2/tasks",
                     json={

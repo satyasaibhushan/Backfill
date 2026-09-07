@@ -205,6 +205,8 @@ function render() {
   $("#eyebrow").textContent = title[0];
   $("#page-title").textContent = title[1];
   $("#page-description").textContent = title[2];
+  $("#connect-application").hidden = !window.backfillCloud || !projectFilter;
+  $("#connect-application").onclick = () => window.connectApplication(projectFilter);
   $("#breadcrumb").textContent = projectFilter
     ? "Projects / " + projectName(projectFilter)
     : "Workspace / " +

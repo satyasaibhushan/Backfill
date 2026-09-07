@@ -16,6 +16,7 @@ from backfill.auth import owner_token
 from backfill.config import Settings, load_settings
 from backfill.database import Database
 from backfill.execution import Execution
+from backfill.external import External
 from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.quota import QuotaError, QuotaService
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
         app.state.governor = Governor(app.state.quota)
         app.state.meter = Meter(app.state.quota, settings)
         app.state.tasks = Tasks(app.state.quota, settings)
+        app.state.external = External(app.state.tasks, app.state.governor)
         app.state.execution = Execution(app.state.tasks, app.state.governor, app.state.meter)
         app.state.tickets = {}
         app.state.sessions = {}
@@ -142,6 +144,51 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
     owned = [Depends(owner)]
     scoped = [Depends(worker)]
 
+    def application(request: Request):
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        return request.app.state.external.identity(token)
+
+    @app.put("/v2/app-grants", dependencies=owned)
+    async def sync_grants(request: Request):
+        request.app.state.external.sync(await request.json())
+        return {"ok": True}
+
+    @app.get("/v2/external", dependencies=[Depends(application)])
+    def external_status(request: Request, principal: Annotated[dict, Depends(application)]):
+        project = next(
+            (
+                p
+                for p in request.app.state.tasks.list()["projects"]
+                if p["id"] == principal["project"]
+            ),
+            None,
+        )
+        return {"project": project, "connected": project is not None}
+
+    @app.post("/v2/external/tasks")
+    async def external_register(request: Request, principal: Annotated[dict, Depends(application)]):
+        body = await request.json()
+        return request.app.state.external.register(
+            principal, body.get("request_id"), body.get("task", {})
+        )
+
+    @app.post("/v2/external/tasks/{key}/start")
+    def external_start(
+        key: str, request: Request, principal: Annotated[dict, Depends(application)]
+    ):
+        return request.app.state.external.start(principal, key)
+
+    @app.get("/v2/external/tasks/{key}")
+    def external_get(key: str, request: Request, principal: Annotated[dict, Depends(application)]):
+        request.app.state.external.record(principal, key)
+        return request.app.state.tasks.get(key)
+
+    @app.post("/v2/external/tasks/{key}/progress")
+    async def external_progress(
+        key: str, request: Request, principal: Annotated[dict, Depends(application)]
+    ):
+        return request.app.state.external.update(principal, key, await request.json())
+
     @app.get("/v1/status", dependencies=owned)
     def overview(service: Quota, request: Request) -> dict:
         return {**service.overview(), **request.app.state.governor.overview()}
@@ -216,6 +263,7 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
 
     @app.post("/v1/workloads/{key}/runs/{run_id}/usage", dependencies=scoped)
     def run_usage(key: Key, run_id: Key, value: RunUsage, request: Request) -> dict:
+        request.app.state.external.enforce(key)
         return request.app.state.governor.report(key, run_id, value)
 
     @app.post("/v1/meters/refresh", dependencies=owned)

@@ -48,6 +48,14 @@ def parser() -> argparse.ArgumentParser:
     connection.add_argument("--server", required=True)
     connection.add_argument("--code", required=True)
     connection.add_argument("--install", action="store_true")
+    app_connection = commands.add_parser(
+        "connect-app", help="connect an application to one project"
+    )
+    app_connection.add_argument("--server", required=True)
+    app_connection.add_argument("--code", required=True)
+    app_run = commands.add_parser("run-app", help="guard a run owned by an application")
+    app_run.add_argument("--connection", type=Path, required=True)
+    app_run.add_argument("--json", default="-")
     commands.add_parser("worker", help="maintain the outbound website connection")
     commands.add_parser("init", help="create private owner credential and data directory")
     commands.add_parser("serve", help="serve quota API on a private Unix socket")
@@ -90,6 +98,15 @@ def run(args: argparse.Namespace) -> int:
     settings = load_settings()
     if args.data_dir:
         settings.data_dir = args.data_dir
+    if args.command == "connect-app":
+        from backfill.app_client import connect_app
+
+        emit(connect_app(settings, args.server, args.code))
+        return 0
+    if args.command == "run-app":
+        from backfill.app_client import execute
+
+        return asyncio.run(execute(args.connection, read_json(args.json)))
     if args.command == "connect":
         from backfill.worker import connect
 

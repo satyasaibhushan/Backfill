@@ -27,6 +27,8 @@ async def test_reconnect_replays_receipt_without_losing_ack(tmp_path):
     sent = []
 
     def local(request):
+        if request.url.path == "/v2/app-grants":
+            return httpx.Response(200, json={"ok": True})
         if request.url.path == "/v2/overview":
             return httpx.Response(200, json={"tasks": []})
         applied.append(json.loads(request.content))

@@ -157,6 +157,8 @@ class Worker:
         response.raise_for_status()
         value = response.json()
         self.responses = []
+        grant_sync = await local.put("/v2/app-grants", json=value.get("app_connections", []))
+        grant_sync.raise_for_status()
         (self.root / "connection.seen").write_text(str(time.time()))
         for command in value["commands"]:
             # The local receipt and task change are one transaction. Redelivery is safe.

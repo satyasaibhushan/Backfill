@@ -9,6 +9,12 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, text
 
 SCHEMA = [
+    (
+        "CREATE TABLE IF NOT EXISTS app_connections (id TEXT PRIMARY KEY, project "
+        "TEXT NOT NULL, machine TEXT NOT NULL, name TEXT NOT NULL, hash TEXT, code "
+        "TEXT NOT NULL UNIQUE, expires DOUBLE PRECISION NOT NULL, revoked INTEGER "
+        "NOT NULL DEFAULT 0)"
+    ),
     "CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY, password TEXT NOT NULL)",
     (
         "CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, expires DOUBLE PRECISION NOT"

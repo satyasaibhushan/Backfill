@@ -123,3 +123,34 @@ document.addEventListener("DOMContentLoaded", () => {
   state();
   setInterval(state, 8000);
 });
+
+window.connectApplication = async (project) => {
+ const dialog=document.createElement("dialog");dialog.className="pair-dialog";
+ const heading=document.createElement("h2");heading.textContent="Connect application";
+ const detail=document.createElement("p");detail.textContent="This connection shares only this project’s allowance.";
+ const label=document.createElement("label");label.textContent="Application name";
+ const name=document.createElement("input");name.placeholder="Task Finder";name.maxLength=100;label.append(name);
+ const list=document.createElement("div"), error=document.createElement("p");error.setAttribute("role","alert");
+ const command=document.createElement("textarea");command.readOnly=true;command.hidden=true;command.rows=4;command.setAttribute("aria-label","Application setup command");
+ const copy=document.createElement("button");copy.textContent="Copy command";copy.hidden=true;
+ copy.onclick=async()=>{await navigator.clipboard.writeText(command.value);copy.textContent="Copied";};
+ const create=document.createElement("button");create.textContent="Create connection";create.className="primary";
+ const base="/cloud/projects/"+encodeURIComponent(project)+"/connections";
+ const refresh=async()=>{
+  const rows=await api(base);list.replaceChildren();
+  for(const item of rows.filter(r=>!r.revoked)){
+   const row=document.createElement("p");row.textContent=item.name+" · "+(item.connected?"Connected":"Awaiting setup")+" ";
+   const revoke=document.createElement("button");revoke.textContent="Disconnect";
+   revoke.onclick=async()=>{try{await api(base+"/"+item.id,"DELETE",{});await refresh();}catch(e){error.textContent=e.message;}};
+   row.append(revoke);list.append(row);
+  }
+ };
+ create.onclick=async()=>{create.disabled=true;error.textContent="";try{
+  const value=await api(base,"POST",{name:name.value.trim()||"Application"});command.value=value.command;command.hidden=false;copy.hidden=false;
+  detail.textContent="Run this on the connected machine. The code expires in 10 minutes.";await refresh();
+ }catch(e){error.textContent=e.message;}finally{create.disabled=false;}};
+ const close=document.createElement("button");close.textContent="Close";close.onclick=()=>dialog.close();
+ dialog.append(heading,detail,label,create,command,copy,list,error,close);document.body.append(dialog);
+ dialog.addEventListener("close",()=>dialog.remove());dialog.showModal();
+ try{await refresh();}catch(e){error.textContent=e.message;}
+};
