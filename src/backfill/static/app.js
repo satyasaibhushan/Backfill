@@ -210,7 +210,7 @@ function render() {
   $("#capacity").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${icon(a.provider === "claude" ? "star" : "terminal")}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(w.label)} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Tasks on hold</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
+        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${icon(a.provider === "claude" ? "star" : "terminal")}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(windowLabel(w.label))} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Incomplete quota data</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
     )
     .join("");
   const running = data.tasks.filter((t) => t.state === "running").length;
@@ -299,7 +299,7 @@ function renderList() {
   $("#task-list").innerHTML = tasks
     .map(
       (t) =>
-        `<div class="task-row ${esc(t.state)}" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="Open ${esc(t.title)}"><div class="task-symbol" aria-hidden="true">${{ running: "↻", review: "✓", done: "✓", failed: "!", paused: "Ⅱ" }[t.state] || "↗"}</div><div class="task-main"><div class="task-title">${esc(t.title)}</div>${t.state === "done" ? `<div class="task-meta">${esc(usageText(t))}</div>` : ""}<div class="task-meta">${t.project ? `<span>${esc(projectName(t.project))}</span><span>·</span>` : ""}<span>${t.selected_provider ? accountName(t.selected_provider) : t.provider === "auto" ? "Automatic account" : accountName(t.provider)}</span>${t.priority === "high" ? "<span>· High priority</span>" : ""}${t.due > Date.now() / 1000 ? `<span>· ${esc(date(t.due))}</span>` : ""}</div></div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><span class="task-arrow" aria-hidden="true">↗</span></div>`,
+        `<div class="task-row ${esc(t.state)}" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="Open ${esc(t.title)}"><div class="task-symbol" aria-hidden="true">${{ running: "↻", review: "✓", done: "✓", failed: "!", paused: "Ⅱ" }[t.state] || "↗"}</div><div class="task-main"><div class="task-title">${esc(t.title)}</div><div class="task-meta">${t.project ? `<span>${esc(projectName(t.project))}</span><span>·</span>` : ""}<span>${t.selected_provider ? accountName(t.selected_provider) : t.provider === "auto" ? "Automatic account" : accountName(t.provider)}</span>${t.state === "done" ? `<span>·</span><span>${esc(usageText(t))}</span>` : ""}${t.priority === "high" ? "<span>· High priority</span>" : ""}${t.due > Date.now() / 1000 ? `<span>· ${esc(date(t.due))}</span>` : ""}</div></div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><span class="task-arrow" aria-hidden="true">↗</span></div>`,
     )
     .join("");
   $$("[data-task]").forEach((el) => {
@@ -484,7 +484,7 @@ function renderDetail(t) {
   currentTask = t;
   const active = ["queued", "running", "waiting"].includes(t.state);
   $("#detail-content").innerHTML =
-    `<div class="detail-header"><div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><h2>${esc(t.title)}</h2></div><button class="icon" id="detail-close" aria-label="Close">×</button></div><div class="detail-meta"><span>${esc(projectName(t.project) || "Independent task")}</span><span>${accountName(t.selected_provider || t.provider)}</span><span>${t.allowance}% session & weekly allowance</span></div>${t.reason ? `<p class="reason">${esc(t.reason)}</p>` : ""}${t.paused_until ? `<p class="reason">Resumes ${esc(date(t.paused_until))}</p>` : ""}<details class="detail-section" ${!t.output ? "open" : ""}><summary>Instructions</summary><div class="instructions">${esc(t.instructions)}</div>${t.folder ? `<p class="detail-meta">${esc(t.folder)}</p>` : ""}</details>${t.attempts.length ? `<div class="detail-section"><h3>Estimated quota used</h3><p>${esc(usageText(t))}</p><small>Account movement across all runs. May include other work and miss delayed reporting.</small></div>` : ""}<div class="detail-section"><h3>${t.state === "running" ? "Work in progress" : t.state === "review" ? "Result" : "Latest result"}</h3>${t.output ? `<div class="result">${markdown(t.output)}</div>` : `<p class="instructions">${t.state === "running" ? "The executor is working. Its result will appear here." : "The result will appear here after this task runs."}</p>`}</div>${t.state === "review" ? '<div class="feedback"><label>Want something changed?<textarea id="feedback" rows="3" placeholder="Describe the change. The next pass will include this result and your feedback."></textarea></label></div>' : ""}<div class="detail-actions"><div>${t.output ? `<a class="quiet" href="/v2/tasks/${esc(t.id)}/result">Download result</a>` : ""}${!["running", "review", "done", "cancelled"].includes(t.state) ? '<button class="quiet" id="edit-task">Edit task</button>' : ""}</div><div>${t.state === "review" ? '<button class="secondary" data-action="revise">Request changes</button><button class="primary" data-action="approve">Approve result ✓</button>' : active ? '<button class="quiet" data-action="cancel">Cancel task</button><button class="secondary" id="pause-task">Pause task</button>' : ["paused", "waiting", "failed", "cancelled"].includes(t.state) ? '<button class="primary" data-action="retry">Resume task ↗</button>' : ""}</div></div>${t.attempts.length ? `<details class="explanation"><summary>Run history · ${t.attempts.length}</summary>${t.attempts.map((a) => `<div class="history-row"><span>${esc(date(a.started))} · ${accountName(a.provider)}</span><span>${esc(names[a.state] || a.state)}</span></div>`).join("")}</details>` : ""}`;
+    `<div class="detail-header"><div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><h2>${esc(t.title)}</h2></div><button class="icon" id="detail-close" aria-label="Close">×</button></div><div class="detail-meta"><span>${esc(projectName(t.project) || "Independent task")}</span><span>${accountName(t.selected_provider || t.provider)}</span><span>${t.allowance}% quota limit</span></div>${t.reason ? `<p class="reason">${esc(t.reason)}</p>` : ""}${t.paused_until ? `<p class="reason">Resumes ${esc(date(t.paused_until))}</p>` : ""}<details class="detail-section" ${!t.output ? "open" : ""}><summary>Instructions</summary><div class="instructions">${esc(t.instructions)}</div>${t.folder ? `<p class="detail-meta">${esc(t.folder)}</p>` : ""}</details>${t.attempts.length ? `<div class="detail-section"><h3>Estimated quota used</h3><p>${esc(usageText(t))}</p><small>Account movement across all runs. May include other work and miss delayed reporting.</small></div>` : ""}<div class="detail-section"><h3>${t.state === "running" ? "Work in progress" : t.state === "review" ? "Result" : "Latest result"}</h3>${t.output ? `<div class="result">${markdown(t.output)}</div>` : `<p class="instructions">${t.state === "running" ? "The executor is working. Its result will appear here." : "The result will appear here after this task runs."}</p>`}</div>${t.state === "review" ? '<div class="feedback"><label>Want something changed?<textarea id="feedback" rows="3" placeholder="Describe the change. The next pass will include this result and your feedback."></textarea></label></div>' : ""}<div class="detail-actions"><div>${t.output ? `<a class="quiet" href="/v2/tasks/${esc(t.id)}/result">Download result</a>` : ""}${!["running", "review", "done", "cancelled"].includes(t.state) ? '<button class="quiet" id="edit-task">Edit task</button>' : ""}</div><div>${t.state === "review" ? '<button class="secondary" data-action="revise">Request changes</button><button class="primary" data-action="approve">Approve result ✓</button>' : active ? '<button class="quiet" data-action="cancel">Cancel task</button><button class="secondary" id="pause-task">Pause task</button>' : ["paused", "waiting", "failed", "cancelled"].includes(t.state) ? '<button class="primary" data-action="retry">Resume task ↗</button>' : ""}</div></div>${t.attempts.length ? `<details class="explanation"><summary>Run history · ${t.attempts.length}</summary>${t.attempts.map((a) => `<div class="history-row"><span>${esc(date(a.started))} · ${accountName(a.provider)}</span><span>${esc(names[a.state] || a.state)}</span></div>`).join("")}</details>` : ""}`;
   $("#detail-close").onclick = () => closeDialog($("#detail-dialog"));
   $("#pause-task")?.addEventListener("click", () => {
     closeDialog($("#detail-dialog"));
@@ -598,7 +598,7 @@ function renderSettings() {
   $("#account-settings").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="connection"><span>${accountName(a.provider)}</span><small>${a.connected ? (a.execution_ready ? "Connected" : "Connected · tasks on hold") : "Quota reading unavailable"}</small></div>`,
+        `<div class="connection"><span>${accountName(a.provider)}</span><small>${a.connected ? (a.execution_ready ? "Connected" : "Connected · incomplete quota data") : "Quota reading unavailable"}</small></div>`,
     )
     .join("");
   $("#project-settings").innerHTML = data.projects.length
@@ -678,15 +678,29 @@ window.addEventListener("hashchange", () => {
   }
 })();
 
+function windowLabel(label) {
+  return label === "Session" ? "5-hour" : label;
+}
 function usageText(task) {
   const usage = task.consumption;
   if (!usage?.windows?.length) return "Usage unavailable";
+  const relevant = usage.windows.filter(
+    (w) => !task.selected_provider || w.provider === task.selected_provider,
+  );
+  if (!relevant.length) return "Usage unavailable";
+  if (relevant.every((w) => w.used === 0)) {
+    return usage.incomplete
+      ? "Usage reading incomplete"
+      : "No measurable quota change";
+  }
   return (
-    usage.windows
+    "Est. " +
+    relevant
       .map(
         (w) =>
-          `${accountName(w.provider)} · ${Number(w.used.toFixed(2))}% ${w.label.toLowerCase()}`,
+          `${Number(w.used.toFixed(2))}% ${windowLabel(w.label).toLowerCase()}`,
       )
-      .join(" · ") + (usage.incomplete ? " · partial reading" : "")
+      .join(" · ") +
+    (usage.incomplete ? " · partial reading" : "")
   );
 }
