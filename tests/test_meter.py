@@ -88,6 +88,7 @@ def test_dashboard_keeps_fresh_reading_when_admission_rejects_it(tmp_path, monke
     monkeypatch.setattr("backfill.meter.probe", read)
     app = create_app(settings)
     with TestClient(app) as client:
+        app.state.meter.defaults()
         headers = {"Authorization": "Bearer " + read_secret(settings.root / "owner.token")}
         client.portal.call(app.state.meter.refresh)
         used[0] = 10
@@ -113,3 +114,81 @@ def test_dashboard_keeps_fresh_reading_when_admission_rejects_it(tmp_path, monke
             a["connected"] and a["execution_ready"]
             for a in client.get("/v2/overview", headers=headers).json()["accounts"]
         )
+
+
+def test_model_quota_is_separate_and_missing_reading_stays_held(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from backfill.auth import read_secret
+    from backfill.main import create_app
+
+    settings = Settings(data_dir=tmp_path, automation_enabled=False, meter_enabled=False)
+    include_model = [True]
+    reset = datetime.now(UTC) + timedelta(days=5)
+
+    async def read(provider, settings):
+        now = datetime.now(UTC)
+        windows = [
+            Window(
+                name="secondary",
+                unit="quota_points",
+                limit=100,
+                used=3,
+                resets_at=reset,
+                duration_seconds=604800,
+            )
+        ]
+        if provider == "claude" and include_model[0]:
+            windows.append(
+                Window(
+                    name="extra.claude-weekly-scoped-fable",
+                    unit="quota_points",
+                    limit=100,
+                    used=80,
+                    resets_at=reset,
+                    duration_seconds=604800,
+                )
+            )
+        return Observation(
+            observed_at=now,
+            covered_through=now,
+            measurement="estimated",
+            source="fixture",
+            source_account=provider,
+            windows=windows,
+        )
+
+    monkeypatch.setattr("backfill.meter.probe", read)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        app.state.meter.defaults()
+        headers = {"Authorization": "Bearer " + read_secret(settings.root / "owner.token")}
+
+        def accounts():
+            return {
+                a["provider"]: a
+                for a in client.get("/v2/overview", headers=headers).json()["accounts"]
+            }
+
+        client.portal.call(app.state.meter.refresh)
+        first = accounts()
+        assert [(w["label"], w["remaining"]) for w in first["claude"]["windows"]] == [
+            ("Weekly", 97),
+            ("Fable weekly", 20),
+        ]
+        assert [w["label"] for w in first["codex"]["windows"]] == ["Weekly"]
+        include_model[0] = False
+        client.portal.call(app.state.meter.refresh)
+        missing = accounts()["claude"]
+        assert missing["connected"] is True
+        assert missing["execution_ready"] is False
+        assert missing["windows"][-1] == {
+            "label": "Fable weekly",
+            "remaining": None,
+            "resets_at": None,
+        }
+        include_model[0] = True
+        client.portal.call(app.state.meter.refresh)
+        assert accounts()["claude"]["execution_ready"] is True

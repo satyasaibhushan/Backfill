@@ -258,8 +258,16 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
             for label, predicate in [
                 ("Session", lambda w: w["duration_seconds"] <= 86400),
                 ("Weekly", lambda w: w["duration_seconds"] > 86400),
+                ("Fable weekly", lambda w: w["name"] == "extra.claude-weekly-scoped-fable"),
             ]:
-                group = [w for w in windows if predicate(w)]
+                group = [
+                    w
+                    for w in windows
+                    if predicate(w)
+                    and (label == "Fable weekly" or w["name"] != "extra.claude-weekly-scoped-fable")
+                ]
+                if label == "Fable weekly" and not group and meter["provider"] == "claude":
+                    groups.append({"label": label, "remaining": None, "resets_at": None})
                 if group:
                     tightest = min(group, key=lambda w: (w["limit"] - w["used"]) / w["limit"])
                     groups.append(

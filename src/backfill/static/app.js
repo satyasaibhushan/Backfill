@@ -210,7 +210,25 @@ function render() {
   $("#capacity").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${icon(a.provider === "claude" ? "star" : "terminal")}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(windowLabel(w.label))} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Incomplete quota data</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
+        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${icon(a.provider === "claude" ? "star" : "terminal")}</span>${accountName(a.provider)}</div>${
+          a.connected
+            ? `<div class="account-values">${a.windows
+                .filter((w) => w.label !== "Fable weekly")
+                .map(
+                  (w) =>
+                    `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(windowLabel(w.label))} left</span></div>`,
+                )
+                .join("")}</div>${a.windows
+                .filter((w) => w.label === "Fable weekly")
+                .map(
+                  (w) =>
+                    `<div class="model-quota" title="${w.remaining === null ? "A fresh Fable quota reading is required before background work can run." : `Resets ${esc(date(w.resets_at))}`}"><span>Fable weekly</span><span>${w.remaining === null ? "Unavailable" : `${Math.floor(w.remaining)}% left`}</span></div>`,
+                )
+                .join(
+                  "",
+                )}${a.execution_ready || a.windows.some((w) => w.label === "Fable weekly" && w.remaining === null) ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Incomplete quota data</span>'}`
+            : '<span class="account-unavailable">Capacity unavailable</span>'
+        }</div>`,
     )
     .join("");
   const running = data.tasks.filter((t) => t.state === "running").length;

@@ -315,6 +315,16 @@ main {
   font-size: 10px;
   color: var(--muted);
 }
+.model-quota {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding-top: 8px;
+  font-size: 10px;
+  color: var(--muted);
+}
 .account-unavailable {
   font-size: 12px;
   color: var(--amber);
