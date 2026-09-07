@@ -10,6 +10,7 @@ from pydantic import AwareDatetime, Field, field_validator
 
 from backfill.config import Settings
 from backfill.quota import QuotaError, QuotaService
+from backfill.quota_display import FABLE_WINDOW, account_window, duration_label
 from backfill.schemas import Contract, Key
 
 
@@ -107,11 +108,20 @@ class Tasks:
             baseline = json.loads(row["baseline"])
             charges = json.loads(row["spending"])
             for window in baseline["windows"]:
+                if (
+                    not account_window(row["provider"], window["name"])
+                    and window["name"] != FABLE_WINDOW
+                ):
+                    continue
                 charge = charges.get(window["name"])
                 if charge is None:
                     incomplete.add(job)
                     continue
-                label = "Session" if window["duration_seconds"] <= 86400 else "Weekly"
+                label = (
+                    "Fable weekly"
+                    if window["name"] == FABLE_WINDOW
+                    else duration_label(window["duration_seconds"])
+                )
                 key = (row["provider"], label, window["name"])
                 used = charge.get("total", charge["used"])
                 # Older runs counted the whole window when its reset estimate moved.

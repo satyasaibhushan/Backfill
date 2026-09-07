@@ -19,6 +19,7 @@ from backfill.execution import Execution
 from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.quota import QuotaError, QuotaService
+from backfill.quota_display import display_windows
 from backfill.schemas import (
     AccountInput,
     Acquire,
@@ -254,37 +255,7 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
                 obs and obs["source_account"] == account["observation"]["source_account"]
             )
             windows = obs["windows"] if obs else []
-            groups = []
-            for label, predicate in [
-                ("Session", lambda w: w["duration_seconds"] <= 86400),
-                ("Weekly", lambda w: w["duration_seconds"] > 86400),
-                ("Fable weekly", lambda w: w["name"] == "extra.claude-weekly-scoped-fable"),
-            ]:
-                group = [
-                    w
-                    for w in windows
-                    if predicate(w)
-                    and (label == "Fable weekly" or w["name"] != "extra.claude-weekly-scoped-fable")
-                ]
-                if label == "Fable weekly" and not group and meter["provider"] == "claude":
-                    groups.append({"label": label, "remaining": None, "resets_at": None})
-                if group:
-                    tightest = min(group, key=lambda w: (w["limit"] - w["used"]) / w["limit"])
-                    groups.append(
-                        {
-                            "label": label,
-                            "remaining": round(
-                                max(
-                                    0,
-                                    100
-                                    * (tightest["limit"] - tightest["used"])
-                                    / tightest["limit"],
-                                ),
-                                1,
-                            ),
-                            "resets_at": tightest["resets_at"],
-                        }
-                    )
+            groups = display_windows(meter["provider"], windows)
             from datetime import datetime
 
             stale = (
