@@ -51,6 +51,26 @@ def test_submit_execute_review_and_revise_through_actual_guard(provider, access,
                     ],
                 ),
             )
+        policy = root / "development.json"
+        policy.write_text(
+            json.dumps(
+                {
+                    "allow": [
+                        "Read",
+                        "Glob",
+                        "Grep",
+                        "WebFetch",
+                        "WebSearch",
+                        "Write",
+                        "Edit",
+                        "Bash",
+                        "mcp__*",
+                    ],
+                    "directories": [str(root)],
+                    "network_access": True,
+                }
+            )
+        )
         executable = root / "native"
         executable.write_text(f"""#!{sys.executable}
 import sys,json
@@ -59,6 +79,9 @@ def emit(value):print(json.dumps(value),flush=True)
 if "-p" in sys.argv:
     allowed=sys.argv[sys.argv.index("--tools")+1].split(",")
     assert ("Write" in allowed)==({access!r}=="edit")
+    granted=sys.argv[sys.argv.index("--allowedTools")+1].split(",")
+    assert set(allowed) <= set(granted)
+    assert ("mcp__*" in granted)==({access!r}=="edit")
     mode=sys.argv[sys.argv.index("--permission-mode")+1]
     assert mode==("acceptEdits" if {access!r}=="edit" else "dontAsk")
     prompt=sys.stdin.read()
@@ -95,6 +118,7 @@ else:
         env = {
             **os.environ,
             "BACKFILL_AUTOMATION_ENABLED": "true",
+            "BACKFILL_TASK_ACCESS_FILE": str(policy),
             "BACKFILL_METER_ENABLED": "false",
             "BACKFILL_DASHBOARD_PORT": "0",
             "BACKFILL_CODEX_COMMAND": str(executable),

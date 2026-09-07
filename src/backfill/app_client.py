@@ -13,6 +13,7 @@ import httpx
 
 from backfill.auth import private_directory, read_secret, write_secret
 from backfill.config import load_settings
+from backfill.tool_access import codex_permissions
 from backfill.worker import check_server
 
 
@@ -174,13 +175,9 @@ async def execute(connection_path, request):
                 permit["workload"],
             ]
             if provider == "claude":
-                command += [
-                    "--tools",
-                    "Read,Glob,Grep,WebFetch,WebSearch"
-                    + (",Write,Edit,Bash" if job["access"] == "edit" else ""),
-                    "--permission-mode",
-                    "acceptEdits" if job["access"] == "edit" else "dontAsk",
-                ]
+                from backfill.tool_access import claude_permissions
+
+                command += claude_permissions(job["access"], settings)
             env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -252,6 +249,7 @@ async def execute(connection_path, request):
                                 "params": {
                                     "cwd": cwd,
                                     "model": settings.codex_task_model,
+                                    "config": codex_permissions(job["access"], settings),
                                     "approvalPolicy": "never",
                                     "sandbox": "workspace-write"
                                     if job["access"] == "edit"

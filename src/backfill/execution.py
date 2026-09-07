@@ -10,6 +10,7 @@ from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.schemas import TaskBudget, WorkloadInput
 from backfill.tasks import PRIORITY, Tasks
+from backfill.tool_access import codex_permissions
 
 
 class Execution:
@@ -126,15 +127,9 @@ class Execution:
                 workkey,
             ]
             if provider == "claude":
-                tools = "Read,Glob,Grep,WebFetch,WebSearch"
-                if job["access"] == "edit":
-                    tools += ",Write,Edit,Bash"
-                command += [
-                    "--tools",
-                    tools,
-                    "--permission-mode",
-                    "acceptEdits" if job["access"] == "edit" else "dontAsk",
-                ]
+                from backfill.tool_access import claude_permissions
+
+                command += claude_permissions(job["access"], settings)
             env = {**os.environ, "BACKFILL_DATA_DIR": str(settings.root)}
             # An editable install or a source deployment must resolve in task folders too.
             from pathlib import Path
@@ -199,6 +194,7 @@ class Execution:
                                     "params": {
                                         "cwd": cwd,
                                         "model": settings.codex_task_model,
+                                        "config": codex_permissions(job["access"], settings),
                                         "approvalPolicy": "never",
                                         "sandbox": "read-only"
                                         if job["access"] == "read"

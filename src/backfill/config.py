@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     codex_command: str = "codex"
     codex_task_model: str = "gpt-5.6-luna"
     codex_task_reasoning: Literal["low", "medium", "high", "xhigh", "max"] = "high"
+    task_access_file: Path = Path("~/.config/agents-config/development.json")
     codexbar_command: str = "codexbar"
     claude_command: str = "claude"
     claude_quota_source: Literal["auto", "oauth", "cli", "web"] | None = None
