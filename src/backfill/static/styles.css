@@ -472,7 +472,6 @@ main {
   font-size: 32px;
   display: grid;
   place-items: center;
-  transform: rotate(-7deg);
   margin-bottom: 4px;
 }
 .empty p {
@@ -1049,4 +1048,38 @@ body.modal-open {
     scroll-behavior: auto !important;
     transition: none !important;
   }
+}
+
+.ui-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.brand-symbol,
+.account-glyph,
+.search [data-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.account-glyph,
+.search [data-icon] {
+  width: 18px;
+  height: 18px;
+}
+.account-glyph .ui-icon,
+.search .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+.empty-symbol .ui-icon {
+  width: 28px;
+  height: 28px;
+}
+.icon {
+  padding: 0;
+  line-height: 1;
 }

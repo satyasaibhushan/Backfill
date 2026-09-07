@@ -1,3 +1,16 @@
+const iconPaths = {
+  arrow: '<path d="M6 18 18 6M6 6h12v12"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  terminal: '<path d="m4 6 5 6-5 6m9 0h7"/>',
+  star: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M5.6 18.4 18.4 5.6"/>',
+};
+function icon(name) {
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name] || iconPaths.arrow}</svg>`;
+}
+document.querySelectorAll("[data-icon]").forEach((el) => {
+  el.innerHTML = icon(el.dataset.icon);
+});
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const esc = (v) =>
@@ -197,7 +210,7 @@ function render() {
   $("#capacity").innerHTML = data.accounts
     .map(
       (a) =>
-        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${a.provider === "claude" ? "✳" : "›_"}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(w.label)} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Tasks on hold</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
+        `<div class="account-mini" title="${a.connected ? "Available capacity" : "Fresh quota readings are unavailable"}"><div class="account-name"><span class="account-glyph" aria-hidden="true">${icon(a.provider === "claude" ? "star" : "terminal")}</span>${accountName(a.provider)}</div>${a.connected ? `<div class="account-values">${a.windows.map((w) => `<div title="Resets ${esc(date(w.resets_at))}"><strong>${Math.floor(w.remaining)}<span>%</span></strong><span>${esc(w.label)} left</span></div>`).join("")}</div>${a.execution_ready ? "" : '<span class="account-unavailable" title="Readings are available, but inconsistent quota data is holding background work.">Tasks on hold</span>'}` : '<span class="account-unavailable">Capacity unavailable</span>'}</div>`,
     )
     .join("");
   const running = data.tasks.filter((t) => t.state === "running").length;
@@ -276,7 +289,7 @@ function renderList() {
                   : "Write the instructions and choose when it should run.",
               ];
     $("#task-list").innerHTML =
-      `<div class="empty"><div class="empty-symbol" aria-hidden="true">${empty[0]}</div><h2>${empty[1]}</h2><p>${empty[2]}</p>${view === "tasks" && filter === "all" && !q ? '<button class="primary" id="empty-new">New task ↗</button><div class="suggestions"><button class="suggestion" data-template="history">Summarize a project</button><button class="suggestion" data-template="review">Review recent changes</button><button class="suggestion" data-template="research">Research a question</button></div>' : ""}</div>`;
+      `<div class="empty"><div class="empty-symbol" aria-hidden="true">${icon(empty[0] === "✓" ? "check" : empty[0] === "⌕" ? "search" : "arrow")}</div><h2>${empty[1]}</h2><p>${empty[2]}</p>${view === "tasks" && filter === "all" && !q ? '<button class="primary" id="empty-new">New task ↗</button><div class="suggestions"><button class="suggestion" data-template="history">Summarize a project</button><button class="suggestion" data-template="review">Review recent changes</button><button class="suggestion" data-template="research">Research a question</button></div>' : ""}</div>`;
     $("#empty-new")?.addEventListener("click", () => newTask());
     $$("[data-template]").forEach(
       (b) => (b.onclick = () => newTask(b.dataset.template)),
