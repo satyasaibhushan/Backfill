@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -117,7 +118,7 @@ else:
             )
             emit({{"id":event["id"],"result":{{"turn":{{"id":"turn-one"}}}}}})
             emit({{"method":"turn/started","params":{{"threadId":"thread-one"}}}})
-            usage={{"total":{{"totalTokens":60 if resumed else 30}}}}
+            usage={{"total":{{"totalTokens":10 if resumed else 30}}}}
             emit({{"method":"thread/tokenUsage/updated",
                   "params":{{"threadId":"thread-one","tokenUsage":usage}}}})
             progress="Progress chatter"
@@ -248,6 +249,11 @@ else:
                         ]
                         == "thread-one"
                     )
+                    with sqlite3.connect(root / "quota.db") as db:
+                        tokens = db.execute(
+                            "SELECT tokens FROM native_runs ORDER BY created_at"
+                        ).fetchall()
+                    assert tokens == [(30,), (10 if provider == "codex" else 30,)]
                     return
                 result = client.post(
                     "/v2/tasks",

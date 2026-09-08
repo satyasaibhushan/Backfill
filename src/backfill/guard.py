@@ -77,7 +77,7 @@ async def guard(
             print(json.dumps({"decision": "wait", "reason": permit["reason"]}), file=sys.stderr)
             return 2
         run_id = permit["run_id"]
-        usage = Usage(provider, permit.get("baselines"))
+        usage = Usage(provider)
         sequence = 0
         stopping = asyncio.Event()
         reason = "failed"
@@ -137,12 +137,10 @@ async def guard(
                         params = event.get("params") or {}
                         request_id = event.get("id")
                         if request_id in pending_threads:
-                            operation = pending_threads.pop(request_id)
+                            pending_threads.pop(request_id)
                             thread = (event.get("result") or {}).get("thread") or {}
                             if thread.get("id"):
                                 known_threads.add(thread["id"])
-                                if operation == "thread/start":
-                                    usage.baselines[thread["id"]] = 0
                                 usage.session_id = thread["id"]
                         if method == "turn/started":
                             busy_threads.add(params["threadId"])

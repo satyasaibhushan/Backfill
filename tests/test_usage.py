@@ -14,12 +14,12 @@ def native(total, thread="one"):
     }
 
 
-def test_cumulative_native_counters_resume_and_duplicates():
-    usage = Usage("codex", {"one": 100})
+def test_process_counters_deduplicate_and_reject_decreases():
+    usage = Usage("codex")
     for n in (120, 120, 200):
         usage.consume(native(n))
     usage.consume(native(30, "child"))
-    assert usage.tokens == 130
+    assert usage.tokens == 230
     with pytest.raises(UsageError):
         usage.consume(native(190))
 
@@ -78,3 +78,14 @@ def test_reset_or_invalid_counters_fail_closed():
         usage.consume({"type": "system", "subtype": "conversation_reset"})
     with pytest.raises(UsageError):
         usage.consume({"type": "result", "total_cost_usd": float("nan")})
+
+
+@pytest.mark.parametrize("resumed_total", [96_631, 1_200_000])
+def test_resumed_process_charges_its_full_usage(resumed_total):
+    previous = Usage("codex")
+    previous.consume(native(1_049_896))
+    resumed = Usage("codex")
+    resumed.consume(native(resumed_total))
+    resumed.consume(native(resumed_total))
+    assert resumed.tokens == resumed_total
+    assert previous.tokens + resumed.tokens == 1_049_896 + resumed_total

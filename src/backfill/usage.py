@@ -19,7 +19,7 @@ def count(value: object) -> int:
 
 
 class Usage:
-    def __init__(self, provider: str, baselines: dict[str, int] | None = None):
+    def __init__(self, provider: str):
         self.provider = provider
         self.tokens = 0
         self.cost = 0.0
@@ -29,7 +29,6 @@ class Usage:
         self.seen = False
         self.messages: dict[str, dict] = {}
         self.streams: dict[str, str] = {}
-        self.baselines = baselines or {}
         self.counters: dict[str, int] = {}
 
     def consume(self, event: dict) -> None:
@@ -37,13 +36,14 @@ class Usage:
             params = event.get("params") or {}
             method = event.get("method")
             if method == "thread/tokenUsage/updated":
-                # The cumulative counter also deduplicates rate-limit-only notifications.
+                # Counters accumulate within this process, including resumed threads.
+                # Previous processes are already charged by the governor.
                 key = params["threadId"]
                 total = count(params["tokenUsage"]["total"]["totalTokens"])
-                if total < self.counters.get(key, self.baselines.get(key, 0)):
+                if total < self.counters.get(key, 0):
                     raise UsageError("native cumulative counter decreased")
                 self.counters[key] = total
-                self.tokens = sum(v - self.baselines.get(k, 0) for k, v in self.counters.items())
+                self.tokens = sum(self.counters.values())
                 self.seen = True
             if method == "turn/started":
                 self.complete = False
