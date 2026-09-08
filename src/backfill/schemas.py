@@ -151,7 +151,17 @@ class RunStart(Contract):
     provider: Literal["codex", "claude"]
 
 
+class InferenceUsage(Contract):
+    model: str | None = None
+    mode: str = "unknown"
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    cache_read_tokens: int = Field(default=0, ge=0)
+    cache_write_tokens: int = Field(default=0, ge=0)
+
+
 class RunUsage(Contract):
+    inference: list[InferenceUsage] = Field(default_factory=list, max_length=200)
     sequence: int = Field(ge=0)
     tokens: int = Field(ge=0, le=10**12)
     cost_usd: Amount = 0

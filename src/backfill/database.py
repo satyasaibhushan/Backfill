@@ -5,6 +5,14 @@ from contextvars import ContextVar
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS quota_history (
+    account TEXT NOT NULL, observed_at REAL NOT NULL, covered_through REAL NOT NULL,
+    observation TEXT NOT NULL, PRIMARY KEY(account, observed_at)
+);
+CREATE TABLE IF NOT EXISTS inference_history (
+    run_id TEXT NOT NULL, sequence INTEGER NOT NULL, at REAL NOT NULL,
+    payload TEXT NOT NULL, PRIMARY KEY(run_id, sequence)
+);
 CREATE TABLE IF NOT EXISTS accounts (
     key TEXT PRIMARY KEY, policy TEXT NOT NULL, observation TEXT
 );

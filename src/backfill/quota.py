@@ -211,6 +211,15 @@ class QuotaService:
                         ),
                     )
             db.execute(
+                "INSERT INTO quota_history VALUES (?,?,?,?)",
+                (
+                    key,
+                    observation.observed_at.timestamp(),
+                    observation.covered_through.timestamp(),
+                    observation.model_dump_json(),
+                ),
+            )
+            db.execute(
                 "UPDATE accounts SET observation=? WHERE key=?",
                 (observation.model_dump_json(), key),
             )

@@ -2,6 +2,8 @@
 
 import math
 
+from backfill.schemas import InferenceUsage
+
 
 class UsageError(ValueError):
     pass
@@ -30,6 +32,21 @@ class Usage:
         self.messages: dict[str, dict] = {}
         self.streams: dict[str, str] = {}
         self.counters: dict[str, int] = {}
+        self.details: dict[str, InferenceUsage] = {}
+        self.message_models: dict[str, str | None] = {}
+
+    @property
+    def inference(self) -> list[dict]:
+        groups: dict[tuple[str | None, str], InferenceUsage] = {}
+        for value in self.details.values():
+            group = groups.setdefault(
+                (value.model, value.mode), InferenceUsage(model=value.model, mode=value.mode)
+            )
+            group.input_tokens += value.input_tokens
+            group.output_tokens += value.output_tokens
+            group.cache_read_tokens += value.cache_read_tokens
+            group.cache_write_tokens += value.cache_write_tokens
+        return [value.model_dump() for value in groups.values()]
 
     def consume(self, event: dict) -> None:
         if self.provider == "codex":
@@ -45,6 +62,20 @@ class Usage:
                 self.counters[key] = total
                 self.tokens = sum(self.counters.values())
                 self.seen = True
+                raw = params["tokenUsage"]["total"]
+                # Total-only events cannot be priced: missing categories are not zero.
+                if all(k in raw for k in ("inputTokens", "outputTokens", "cachedInputTokens")):
+                    inputs = count(raw["inputTokens"])
+                    cached = count(raw["cachedInputTokens"])
+                    if cached > inputs:
+                        raise UsageError("cached input exceeds total input")
+                    self.details[key] = InferenceUsage(
+                        model=params.get("model"),
+                        mode=params.get("serviceTier") or "unknown",
+                        input_tokens=inputs - cached,
+                        cache_read_tokens=cached,
+                        output_tokens=count(raw["outputTokens"]),
+                    )
             if method == "turn/started":
                 self.complete = False
             if method == "turn/completed":
@@ -62,6 +93,7 @@ class Usage:
             if frame.get("type") == "message_start":
                 message = frame["message"]
                 self.streams[namespace] = message["id"]
+                self.message_models[message["id"]] = message.get("model")
                 self._message(message["id"], message.get("usage", {}))
             elif frame.get("type") == "message_delta":
                 message_id = self.streams.get(namespace)
@@ -70,6 +102,7 @@ class Usage:
         elif kind == "assistant":
             message = event.get("message") or {}
             if message.get("id") and message.get("usage"):
+                self.message_models[message["id"]] = message.get("model")
                 self._message(message["id"], message["usage"])
         elif kind == "result":
             groups = event.get("modelUsage")
@@ -86,6 +119,17 @@ class Usage:
                     )
                     for g in groups.values()
                 )
+                self.details = {
+                    model: InferenceUsage(
+                        model=model,
+                        mode=event.get("service_tier") or "unknown",
+                        input_tokens=count(g.get("inputTokens", 0)),
+                        output_tokens=count(g.get("outputTokens", 0)),
+                        cache_read_tokens=count(g.get("cacheReadInputTokens", 0)),
+                        cache_write_tokens=count(g.get("cacheCreationInputTokens", 0)),
+                    )
+                    for model, g in groups.items()
+                }
                 self.tokens = max(self.tokens, total)
                 self.seen = True
                 self.complete = True
@@ -111,5 +155,12 @@ class Usage:
         ):
             if name in usage:
                 prior[name] = max(prior.get(name, 0), count(usage[name]))
+        self.details[key] = InferenceUsage(
+            model=self.message_models.get(key),
+            input_tokens=prior.get("input_tokens", 0),
+            output_tokens=prior.get("output_tokens", 0),
+            cache_read_tokens=prior.get("cache_read_input_tokens", 0),
+            cache_write_tokens=prior.get("cache_creation_input_tokens", 0),
+        )
         self.tokens = max(self.tokens, sum(sum(u.values()) for u in self.messages.values()))
         self.seen = True

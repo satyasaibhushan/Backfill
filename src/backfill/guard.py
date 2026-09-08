@@ -98,6 +98,7 @@ async def guard(
                     {
                         "sequence": sequence,
                         "tokens": usage.tokens,
+                        "inference": usage.inference,
                         "cost_usd": usage.cost,
                         "session_id": usage.session_id,
                         "counters": usage.counters,

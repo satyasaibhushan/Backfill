@@ -231,6 +231,20 @@ class Governor:
                 raise QuotaError("run already finalized")
             if row["state"] == "uncertain" and not report.final:
                 return self._status(db, row)
+            prior_details = (
+                json.loads(row["last_report"]).get("inference", []) if row["last_report"] else []
+            )
+            details = [u.model_dump() for u in report.inference]
+            if details and details != prior_details:
+                db.execute(
+                    "INSERT INTO inference_history VALUES (?,?,?,?)",
+                    (
+                        run_id,
+                        report.sequence,
+                        now,
+                        json.dumps(details),
+                    ),
+                )
             state = "active"
             reason = "allowed"
             if report.final:
