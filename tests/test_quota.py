@@ -288,3 +288,25 @@ def test_direct_grant_status_is_scoped_and_survives_many_later_grants(setup, obs
     assert service.grant_status("bulk", first.grant_id)["can_spend"]
     with pytest.raises(QuotaError, match="not found"):
         service.grant_status("urgent", first.grant_id)
+
+
+def test_confirmed_correction_keeps_existing_reservations(setup, observe):
+    from datetime import timedelta
+
+    service, clock = setup
+    clock[0] += 1
+    observe(used=30)
+    grant = request(service, session=5)
+    before = window(service)["reserved"]
+    old = next(a for a in service.overview()["accounts"] if a["key"] == "account")
+    sample = Observation.model_validate(old["observation"])
+    clock[0] += 30
+    sample.observed_at = sample.covered_through = datetime.fromtimestamp(clock[0], UTC)
+    sample.windows[0].used = 3
+    sample.windows[0].resets_at += timedelta(minutes=5)
+    with pytest.raises(QuotaError, match="decreased"):
+        service.observe("account", sample)
+    service.observe("account", sample, _corrections=frozenset({"session"}))
+    assert window(service)["reserved"] == before
+    assert service.status("bulk")["windows"]["session"]["available"] <= 62
+    assert grant.grant_id

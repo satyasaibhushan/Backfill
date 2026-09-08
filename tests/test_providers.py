@@ -250,3 +250,20 @@ async def test_finished_native_process_survives_group_permission_cleanup(monkeyp
     monkeypatch.setattr(os, "killpg", inaccessible_group)
     await stop_probe(process)
     assert process.returncode == 0
+
+
+def test_model_reset_recovered_only_from_matching_label_and_duration(metric):
+    reader = ClaudeCodexBarProvider(Settings())
+    base = {**metric, "resetDescription": "Resets Sep 10, 5:30pm (Asia/Kolkata)"}
+    extra = {**base, "resetDescription": "ResetSep 10, 5:30pm (Asia/Kolkata)"}
+    del extra["resetsAt"]
+    payload = {
+        "provider": "claude",
+        "account": "fixture",
+        "usage": {"secondary": base, "extraRateWindows": [{"id": "fable", "window": extra}]},
+    }
+    result = reader._parse(payload)
+    assert result.windows[1].resets_at == result.windows[0].resets_at
+    extra["resetDescription"] = "Resets Sep 11, 5:30pm (Asia/Kolkata)"
+    with pytest.raises(ValueError, match="incomplete"):
+        reader._parse(payload)

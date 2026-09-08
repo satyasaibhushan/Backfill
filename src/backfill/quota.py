@@ -101,7 +101,9 @@ class QuotaService:
             found = row.fetchone()
         return found["key"] if found else None
 
-    def observe(self, key: str, observation: Observation) -> dict:
+    def observe(
+        self, key: str, observation: Observation, *, _corrections: frozenset[str] = frozenset()
+    ) -> dict:
         now = self.clock()
         if observation.observed_at.timestamp() > now + 2:
             raise QuotaError("observation is in the future", 422)
@@ -146,6 +148,13 @@ class QuotaService:
                         window.duration_seconds,
                     ):
                         raise QuotaError("window contract changed; use a separate account key")
+                    if name in _corrections:
+                        # Repeated native readings can correct usage or an early reset.
+                        # Preserve every reservation and debit across the epoch change.
+                        self._rebase_window(
+                            db, key, name, prior.resets_at.timestamp(), window.resets_at.timestamp()
+                        )
+                        continue
                     if window.resets_at != prior.resets_at:
                         if prior.resets_at <= observation.covered_through:
                             continue

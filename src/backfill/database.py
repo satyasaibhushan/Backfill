@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS meters (
 CREATE TABLE IF NOT EXISTS meter_readings (
     account TEXT PRIMARY KEY REFERENCES accounts(key), observation TEXT, error TEXT
 );
+CREATE TABLE IF NOT EXISTS meter_corrections (
+    account TEXT PRIMARY KEY, observation TEXT NOT NULL, first_seen REAL NOT NULL,
+    samples INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projects (key TEXT PRIMARY KEY, config TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS task_budgets (
     workload TEXT PRIMARY KEY REFERENCES workloads(key),

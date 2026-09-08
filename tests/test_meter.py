@@ -266,3 +266,56 @@ def test_reset_confirmation_state_clears_after_coverage_passes_reset(tmp_path, m
         for account in client.get("/v2/overview", headers=headers).json()["accounts"]:
             assert account["execution_ready"] is True
             assert account["status"] == {"code": "ready", "label": ""}
+
+
+async def test_native_correction_requires_three_spaced_readings_and_survives_restart(
+    tmp_path, monkeypatch
+):
+    from datetime import timedelta
+
+    clock = [datetime(2026, 9, 8, tzinfo=UTC).timestamp()]
+    service = QuotaService(Database(tmp_path / "quota.db"), lambda: clock[0])
+    meter = Meter(service, Settings())
+    meter.defaults()
+    reset = datetime.fromtimestamp(clock[0], UTC) + timedelta(days=6)
+    used = [59]
+
+    async def read(provider, settings):
+        now = datetime.fromtimestamp(clock[0], UTC)
+        return Observation(
+            observed_at=now,
+            covered_through=now,
+            measurement="estimated",
+            source="codex-app-server",
+            source_account=provider,
+            windows=[
+                Window(
+                    name="weekly",
+                    unit="quota_points",
+                    limit=100,
+                    used=used[0],
+                    resets_at=reset,
+                    duration_seconds=604800,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("backfill.meter.probe", read)
+    await meter._one("codex", "codex")
+    used[0] = 3
+    for seconds in (45, 60):
+        clock[0] += seconds
+        await meter._one("codex", "codex")
+        assert (
+            next(a for a in service.overview()["accounts"] if a["key"] == "codex")["observation"][
+                "windows"
+            ][0]["used"]
+            == 59
+        )
+    meter = Meter(service, Settings())
+    clock[0] += 60
+    await meter._one("codex", "codex")
+    with service.database.transaction() as db:
+        row = db.execute("SELECT observation FROM accounts WHERE key='codex'").fetchone()
+        assert Observation.model_validate_json(row[0]).windows[0].used == 3
+        assert db.execute("SELECT error FROM meters WHERE account='codex'").fetchone()[0] is None

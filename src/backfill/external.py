@@ -145,6 +145,10 @@ class External:
                 return {"decision": "wait", "reason": "Backfill website connection is offline"}
             provider, reason = self.tasks.select(job)
             if not provider:
+                db.execute(
+                    "UPDATE jobs SET state='waiting',reason=?,updated=? WHERE id=?",
+                    (reason, self.tasks.now(), key),
+                )
                 return {"decision": "wait", "reason": reason}
             attempt = self.tasks.start(key, provider)
             if not attempt:

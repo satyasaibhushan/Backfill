@@ -57,8 +57,25 @@ class Meter:
             self.quota.observe(account, value)
         except QuotaError as failure:
             error = failure.message
+            if value and error in {
+                "usage decreased before a confirmed reset",
+                "usage decreased before reset",
+            }:
+                corrections = self._confirm_correction(account, value)
+                if corrections:
+                    try:
+                        self.quota.observe(account, value, _corrections=corrections)
+                        error = None
+                    except QuotaError as rejected:
+                        error = rejected.message
         except Exception:
             error = "Quota refresh failed. Check the provider login on this host."
+        if error not in {
+            "usage decreased before a confirmed reset",
+            "usage decreased before reset",
+        }:
+            with self.quota.database.transaction() as db:
+                db.execute("DELETE FROM meter_corrections WHERE account=?", (account,))
         if error == "observation omitted a known quota window":
             with self.quota.database.transaction() as db:
                 row = db.execute(
@@ -94,6 +111,59 @@ class Meter:
                 "UPDATE meters SET checked_at=?,error=? WHERE account=?",
                 (self.quota.clock(), error, account),
             )
+
+    def _confirm_correction(self, account: str, value: Observation) -> frozenset[str]:
+        if value.source not in {"codex-app-server", "codexbar"}:
+            return frozenset()
+        now = self.quota.clock()
+        if not 0 <= now - value.observed_at.timestamp() <= 180:
+            return frozenset()
+        with self.quota.database.transaction() as db:
+            old = Observation.model_validate_json(
+                db.execute("SELECT observation FROM accounts WHERE key=?", (account,)).fetchone()[0]
+            )
+            previous = {w.name: w for w in old.windows}
+            drops = {
+                w.name: w
+                for w in value.windows
+                if w.name in previous and w.used < previous[w.name].used
+            }
+            row = db.execute(
+                "SELECT * FROM meter_corrections WHERE account=?", (account,)
+            ).fetchone()
+            first, samples = now, 1
+            if row:
+                candidate = Observation.model_validate_json(row["observation"])
+                prior = {w.name: w for w in candidate.windows}
+                spacing = (value.observed_at - candidate.observed_at).total_seconds()
+                if spacing < 30:
+                    return frozenset()
+                if (
+                    spacing <= 180
+                    and value.source_account == candidate.source_account
+                    and value.source == candidate.source
+                    and drops
+                    and set(drops)
+                    == {
+                        name
+                        for name, w in prior.items()
+                        if name in previous and w.used < previous[name].used
+                    }
+                    and all(
+                        name in prior
+                        and w.resets_at == prior[name].resets_at
+                        and w.used >= prior[name].used
+                        for name, w in drops.items()
+                    )
+                ):
+                    first, samples = row["first_seen"], row["samples"] + 1
+            db.execute(
+                "INSERT OR REPLACE INTO meter_corrections VALUES (?,?,?,?)",
+                (account, value.model_dump_json(), first, samples),
+            )
+            if samples >= 3 and now - first >= 120:
+                return frozenset(drops)
+        return frozenset()
 
     async def loop(self) -> None:
         while True:

@@ -37,7 +37,7 @@ const localDate = (v) => {
 const names = {
   queued: "Queued",
   running: "Running",
-  waiting: "Waiting for capacity",
+  waiting: "Waiting",
   review: "Ready for review",
   paused: "Paused",
   done: "Completed",
@@ -54,6 +54,17 @@ let data = null,
   detailId = null,
   currentTask = null,
   refreshing = false;
+function taskStatus(t) {
+  if (t.state !== "waiting") return names[t.state] || t.state;
+  const reason = (t.reason || "").toLowerCase();
+  if (reason.includes("approval")) return "Needs approval";
+  if (reason.includes("quota reading")) return "Checking quota";
+  if (reason.includes("another task")) return "Queued";
+  if (reason.includes("allowance") || reason === "budget") return "Allowance reached";
+  if (reason.includes("capacity")) return "Waiting for capacity";
+  return "Waiting";
+}
+
 async function api(path, method = "GET", body) {
   const response = await fetch(path, {
     method,
@@ -332,7 +343,7 @@ function renderList() {
   $("#task-list").innerHTML = tasks
     .map(
       (t) =>
-        `<div class="task-row ${esc(t.state)}" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="Open ${esc(t.title)}"><div class="task-symbol" aria-hidden="true">${{ running: "↻", review: "✓", done: "✓", failed: "!", paused: "Ⅱ" }[t.state] || "↗"}</div><div class="task-main"><div class="task-title">${esc(t.title)}</div><div class="task-meta">${t.project ? `<span>${esc(projectName(t.project))}</span><span>·</span>` : ""}<span>${t.selected_provider ? accountName(t.selected_provider) : t.provider === "auto" ? "Automatic account" : accountName(t.provider)}</span>${t.state === "done" ? `<span>·</span><span>${esc(usageText(t))}</span>` : ""}${t.priority === "high" ? "<span>· High priority</span>" : ""}${t.due > Date.now() / 1000 ? `<span>· ${esc(date(t.due))}</span>` : ""}</div></div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><span class="task-arrow" aria-hidden="true">↗</span></div>`,
+        `<div class="task-row ${esc(t.state)}" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="Open ${esc(t.title)}"><div class="task-symbol" aria-hidden="true">${{ running: "↻", review: "✓", done: "✓", failed: "!", paused: "Ⅱ" }[t.state] || "↗"}</div><div class="task-main"><div class="task-title">${esc(t.title)}</div><div class="task-meta">${t.project ? `<span>${esc(projectName(t.project))}</span><span>·</span>` : ""}<span>${t.selected_provider ? accountName(t.selected_provider) : t.provider === "auto" ? "Automatic account" : accountName(t.provider)}</span>${t.state === "done" ? `<span>·</span><span>${esc(usageText(t))}</span>` : ""}${t.priority === "high" ? "<span>· High priority</span>" : ""}${t.due > Date.now() / 1000 ? `<span>· ${esc(date(t.due))}</span>` : ""}</div></div><span class="badge ${esc(t.state)}">${esc(taskStatus(t))}</span><span class="task-arrow" aria-hidden="true">↗</span></div>`,
     )
     .join("");
   $$("[data-task]").forEach((el) => {
@@ -515,9 +526,9 @@ async function showTask(id) {
 }
 function renderDetail(t) {
   currentTask = t;
-  const active = ["queued", "running", "waiting"].includes(t.state);
+  const active = ["queued", "running", "waiting"].includes(t.state) && taskStatus(t) !== "Needs approval";
   $("#detail-content").innerHTML =
-    `<div class="detail-header"><div><span class="badge ${esc(t.state)}">${esc(names[t.state])}</span><h2>${esc(t.title)}</h2></div><button class="icon" id="detail-close" aria-label="Close">×</button></div><div class="detail-meta"><span>${esc(projectName(t.project) || "Independent task")}</span><span>${accountName(t.selected_provider || t.provider)}</span><span>${t.allowance}% quota limit</span></div>${t.reason ? `<p class="reason">${esc(t.reason)}</p>` : ""}${t.paused_until ? `<p class="reason">Resumes ${esc(date(t.paused_until))}</p>` : ""}<details class="detail-section" ${!t.output ? "open" : ""}><summary>Instructions</summary><div class="instructions">${esc(t.instructions)}</div>${t.folder ? `<p class="detail-meta">${esc(t.folder)}</p>` : ""}</details>${t.attempts.length ? `<div class="detail-section"><h3>Estimated quota used</h3><p>${esc(usageText(t))}</p><small>Account movement across all runs. May include other work and miss delayed reporting.</small></div>` : ""}<div class="detail-section"><h3>${t.state === "running" ? "Work in progress" : t.state === "review" ? "Result" : "Latest result"}</h3>${t.output ? `<div class="result">${markdown(t.output)}</div>` : `<p class="instructions">${t.state === "running" ? "The executor is working. Its result will appear here." : "The result will appear here after this task runs."}</p>`}</div>${t.state === "review" ? '<div class="feedback"><label>Want something changed?<textarea id="feedback" rows="3" placeholder="Describe the change. The next pass will include this result and your feedback."></textarea></label></div>' : ""}<div class="detail-actions"><div>${t.output ? `<a class="quiet" href="/v2/tasks/${esc(t.id)}/result">Download result</a>` : ""}${!["running", "review", "done", "cancelled"].includes(t.state) ? '<button class="quiet" id="edit-task">Edit task</button>' : ""}</div><div>${t.state === "review" ? '<button class="secondary" data-action="revise">Request changes</button><button class="primary" data-action="approve">Approve result ✓</button>' : active ? '<button class="quiet" data-action="cancel">Cancel task</button><button class="secondary" id="pause-task">Pause task</button>' : ["paused", "waiting", "failed", "cancelled"].includes(t.state) ? '<button class="primary" data-action="retry">Resume task ↗</button>' : ""}</div></div>${t.attempts.length ? `<details class="explanation"><summary>Run history · ${t.attempts.length}</summary>${t.attempts.map((a) => `<div class="history-row"><span>${esc(date(a.started))} · ${accountName(a.provider)}</span><span>${esc(names[a.state] || a.state)}</span></div>`).join("")}</details>` : ""}`;
+    `<div class="detail-header"><div><span class="badge ${esc(t.state)}">${esc(taskStatus(t))}</span><h2>${esc(t.title)}</h2></div><button class="icon" id="detail-close" aria-label="Close">×</button></div><div class="detail-meta"><span>${esc(projectName(t.project) || "Independent task")}</span><span>${accountName(t.selected_provider || t.provider)}</span><span>${t.allowance}% quota limit</span></div>${t.reason ? `<p class="reason">${esc(t.reason)}</p>` : ""}${t.paused_until ? `<p class="reason">Resumes ${esc(date(t.paused_until))}</p>` : ""}<details class="detail-section" ${!t.output ? "open" : ""}><summary>Instructions</summary><div class="instructions">${esc(t.instructions)}</div>${t.folder ? `<p class="detail-meta">${esc(t.folder)}</p>` : ""}</details>${t.attempts.length ? `<div class="detail-section"><h3>Estimated quota used</h3><p>${esc(usageText(t))}</p><small>Account movement across all runs. May include other work and miss delayed reporting.</small></div>` : ""}<div class="detail-section"><h3>${t.state === "running" ? "Work in progress" : t.state === "review" ? "Result" : "Latest result"}</h3>${t.output ? `<div class="result">${markdown(t.output)}</div>` : `<p class="instructions">${t.state === "running" ? "The executor is working. Its result will appear here." : "The result will appear here after this task runs."}</p>`}</div>${t.state === "review" ? '<div class="feedback"><label>Want something changed?<textarea id="feedback" rows="3" placeholder="Describe the change. The next pass will include this result and your feedback."></textarea></label></div>' : ""}<div class="detail-actions"><div>${t.output ? `<a class="quiet" href="/v2/tasks/${esc(t.id)}/result">Download result</a>` : ""}${!["running", "review", "done", "cancelled"].includes(t.state) ? '<button class="quiet" id="edit-task">Edit task</button>' : ""}</div><div>${t.state === "review" ? '<button class="secondary" data-action="revise">Request changes</button><button class="primary" data-action="approve">Approve result ✓</button>' : active ? '<button class="quiet" data-action="cancel">Cancel task</button><button class="secondary" id="pause-task">Pause task</button>' : ["paused", "waiting", "failed", "cancelled"].includes(t.state) ? '<button class="primary" data-action="retry">Resume task ↗</button>' : ""}</div></div>${t.attempts.length ? `<details class="explanation"><summary>Run history · ${t.attempts.length}</summary>${t.attempts.map((a) => `<div class="history-row"><span>${esc(date(a.started))} · ${accountName(a.provider)}</span><span>${esc(names[a.state] || a.state)}</span></div>`).join("")}</details>` : ""}`;
   $("#detail-close").onclick = () => closeDialog($("#detail-dialog"));
   $("#pause-task")?.addEventListener("click", () => {
     closeDialog($("#detail-dialog"));

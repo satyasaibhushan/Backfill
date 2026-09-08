@@ -369,7 +369,10 @@ class Tasks:
                 config = json.loads(row["config"])
                 for w in windows:
                     record = charges.get(w["name"])
-                    if record and record["reset"] == w["resets_at"]:
+                    if record and (
+                        record["reset"] == w["resets_at"]
+                        or datetime.fromisoformat(record["reset"]).timestamp() > self.now()
+                    ):
                         if row["job"] == job["id"]:
                             own[w["name"]] += record["used"]
                         if job["project"] and config.get("project") == job["project"]:
@@ -377,22 +380,31 @@ class Tasks:
         return max(own.values(), default=0), max(shared.values(), default=0)
 
     def select(self, job: dict) -> tuple[str | None, str]:
+        if job["state"] == "waiting" and "approval" in job.get("reason", "").lower():
+            return None, job["reason"]
         prefs = self.preferences()
         if prefs.paused or (prefs.paused_until and prefs.paused_until.timestamp() > self.now()):
             return None, "All work is paused."
         overview = self.quota.overview()
         preferred = job["provider"]
         candidates = []
+        blockers = []
         for account in overview["accounts"]:
             key = account["key"]
             if key not in ("claude", "codex") or preferred not in ("auto", key):
                 continue
             obs = account["observation"]
+            with self.quota.database.transaction() as db:
+                health = db.execute("SELECT error FROM meters WHERE account=?", (key,)).fetchone()
+            if health and health[0]:
+                blockers.append(f"{key.title()}: quota reading needs refresh")
+                continue
             if (
                 not obs
                 or self.now() - datetime.fromisoformat(obs["observed_at"]).timestamp()
                 > account["policy"]["snapshot_ttl_seconds"]
             ):
+                blockers.append(f"{key.title()}: quota reading is stale")
                 continue
             policy = account["policy"]
             if policy["paused"] or (
@@ -414,6 +426,11 @@ class Tasks:
                     else None
                 )
             if not meter or meter[0] or busy:
+                blockers.append(
+                    f"{key.title()}: another task is running"
+                    if busy
+                    else f"{key.title()}: quota reading unavailable"
+                )
                 continue
             used, project_used = self.spending(job, key, obs["windows"])
             project_limit = json.loads(project[0])["allowance"] if project else 100
@@ -425,7 +442,12 @@ class Tasks:
                 continue
             candidates.append((headroom - reserve, key))
         if not candidates:
-            return None, "Waiting for available capacity. Your personal reserve stays protected."
+            return (
+                None,
+                "; ".join(blockers)
+                if blockers
+                else "Waiting for available capacity. Your personal reserve stays protected.",
+            )
         return max(candidates)[1], ""
 
     def candidates(self) -> list[dict]:

@@ -118,3 +118,25 @@ def test_auto_retry_can_move_between_account_scoped_workloads(tasks):
     assert second["provider"] == "codex"
     assert second["workload"] != first["workload"]
     assert app.get(job["id"])["selected_provider"] == "codex"
+
+
+def test_external_wait_persists_actual_meter_blocker(tasks):
+    app, _, _, _, service, principal = connected(tasks)
+    job = register(service, principal, provider="claude")
+    with app.quota.database.transaction() as db:
+        db.execute("UPDATE meters SET error='incomplete reading' WHERE account='claude'")
+    result = service.start(principal, job["id"])
+    assert result["decision"] == "wait"
+    saved = app.get(job["id"])
+    assert saved["state"] == "waiting"
+    assert saved["reason"] == "Claude: quota reading needs refresh"
+
+
+def test_approval_wait_does_not_start_again_automatically(tasks):
+    app, _, _, _, service, principal = connected(tasks)
+    job = register(service, principal)
+    with app.quota.database.transaction() as db:
+        db.execute(
+            "UPDATE jobs SET state='waiting',reason='Needs human approval' WHERE id=?", (job["id"],)
+        )
+    assert service.start(principal, job["id"])["reason"] == "Needs human approval"

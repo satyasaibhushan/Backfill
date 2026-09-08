@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import shutil
 
 from backfill.config import Settings
@@ -136,8 +137,36 @@ class ClaudeCodexBarProvider:
         usage = candidate.get("usage") or {}
         account = self._account(candidate)
         windows = []
+        metrics = [usage.get(n) for n in ("primary", "secondary", "tertiary")]
+        metrics += [
+            v.get("window", v) for v in usage.get("extraRateWindows") or [] if isinstance(v, dict)
+        ]
+
+        def complete(metric):
+            if not isinstance(metric, dict) or metric.get("resetsAt") is not None:
+                return metric
+
+            def description(v):
+                text = re.sub(r"^Resets?", "", str(v.get("resetDescription", "")))
+                return re.sub(r"\s+", "", text).lower()
+
+            label = description(metric)
+            matches = {
+                v["resetsAt"]
+                for v in metrics
+                if isinstance(v, dict)
+                and v.get("resetsAt") is not None
+                and label
+                and description(v) == label
+                and v.get("windowMinutes", v.get("windowDurationMins"))
+                == metric.get("windowMinutes", metric.get("windowDurationMins"))
+            }
+            # The CLI sometimes parses the date for one identical reset label only.
+            # Never assume a model window resets with the account window.
+            return {**metric, "resetsAt": matches.pop()} if len(matches) == 1 else metric
+
         for name in ("primary", "secondary", "tertiary"):
-            if window := parse_window(name, usage.get(name)):
+            if window := parse_window(name, complete(usage.get(name))):
                 windows.append(window)
         for index, value in enumerate(usage.get("extraRateWindows") or []):
             if not isinstance(value, dict):
@@ -147,7 +176,7 @@ class ClaudeCodexBarProvider:
             metric = value["window"] if "window" in value else value
             if metric is None:
                 raise ValueError("missing extra quota window")
-            if window := parse_window(name, metric):
+            if window := parse_window(name, complete(metric)):
                 windows.append(window)
         if not windows:
             raise ValueError("no quota windows")
