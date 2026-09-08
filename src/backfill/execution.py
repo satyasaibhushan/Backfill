@@ -83,7 +83,6 @@ class Execution:
                 TaskBudget(
                     token_limit=10**12,
                     run_token_limit=1000000,
-                    max_run_seconds=900,
                     run_cost_usd=30,
                 ),
             )
@@ -303,7 +302,7 @@ class Execution:
             watching = asyncio.create_task(monitor())
             exited = asyncio.create_task(process.wait())
             done, _ = await asyncio.wait(
-                [*readers, watching, exited], timeout=920, return_when=asyncio.FIRST_COMPLETED
+                [*readers, watching, exited], return_when=asyncio.FIRST_COMPLETED
             )
             if watching in done and watching.result() in ("paused", "allowance"):
                 state, reason = "waiting", "Allowance reached. Waiting for capacity to reset."

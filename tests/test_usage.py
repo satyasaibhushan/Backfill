@@ -14,14 +14,17 @@ def native(total, thread="one"):
     }
 
 
-def test_process_counters_deduplicate_and_reject_decreases():
+def test_process_counters_deduplicate_and_preserve_usage_across_reset():
     usage = Usage("codex")
     for n in (120, 120, 200):
         usage.consume(native(n))
     usage.consume(native(30, "child"))
     assert usage.tokens == 230
-    with pytest.raises(UsageError):
-        usage.consume(native(190))
+    usage.consume(native(190))
+    usage.consume(native(190))
+    assert usage.tokens == 420
+    usage.consume(native(200))
+    assert usage.tokens == 430
 
 
 def test_claude_message_id_deduplication_and_whole_tree_result():

@@ -20,8 +20,10 @@ from backfill.schemas import Observation, Policy, TaskBudget, Window, WorkloadIn
 
 
 @pytest.mark.parametrize("provider", ["claude", "codex"])
-@pytest.mark.parametrize("trigger", ["usage", "owner_pause"])
+@pytest.mark.parametrize("trigger", ["usage", "owner_pause", "compaction"])
 def test_actual_guard_process_kills_on_budget_and_records_usage(provider, trigger):
+    if provider == "claude" and trigger == "compaction":
+        pytest.skip("app-server compaction protocol")
     with tempfile.TemporaryDirectory(prefix="bg-", dir="/tmp") as directory:
         root = Path(directory)
         token = owner_token(root)
@@ -55,7 +57,7 @@ def test_actual_guard_process_kills_on_budget_and_records_usage(provider, trigge
         )
         marker = root / "child.pid"
         executable = root / "executor"
-        tokens = 110 if trigger == "usage" else 10
+        tokens = 10 if trigger == "owner_pause" else 110
         event = (
             {
                 "type": "assistant",
@@ -73,6 +75,9 @@ def test_actual_guard_process_kills_on_budget_and_records_usage(provider, trigge
         )
         executable.write_text(f"""#!{sys.executable}
 import subprocess,sys,time,json
+if {trigger!r} == "compaction":
+    assert json.loads(sys.stdin.readline())["method"] == "thread/compact/start"
+    assert json.loads(sys.stdin.readline())["method"] == "thread/goal/set"
 child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)'])
 open({str(marker)!r},'w').write(str(child.pid))
 print({json.dumps(event)!r},flush=True)
@@ -111,7 +116,16 @@ time.sleep(90)
                         assert process.poll() is None and time.monotonic() < deadline
                         time.sleep(0.05)
                     service.set_account(provider, Policy(paused=True))
-                stdout, stderr = process.communicate(input="", timeout=10)
+                commands = (
+                    ""
+                    if trigger != "compaction"
+                    else "\n".join(
+                        json.dumps({"id": i, "method": method, "params": {"threadId": "one"}})
+                        for i, method in enumerate(("thread/compact/start", "thread/goal/set"))
+                    )
+                    + "\n"
+                )
+                stdout, stderr = process.communicate(input=commands, timeout=10)
                 assert process.returncode == 2, stdout + stderr
             finally:
                 if process.poll() is None:
@@ -132,7 +146,7 @@ time.sleep(90)
                     json={"request_id": "retry", "provider": provider},
                 ).json()
                 assert result["reason"] == (
-                    "token_budget_exhausted" if trigger == "usage" else "paused"
+                    "paused" if trigger == "owner_pause" else "token_budget_exhausted"
                 )
             # Grandchild may briefly remain a zombie; it must not be running.
             pid = marker.read_text()

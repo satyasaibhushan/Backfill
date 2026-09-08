@@ -133,3 +133,74 @@ def test_native_background_intervals_do_not_train_user_forecast(governed, observ
     observe(used=5)
     with service.database.transaction() as db:
         assert db.execute("SELECT COUNT(*) FROM demand").fetchone()[0] == 0
+
+
+def test_reference_cost_budget_survives_resume_and_blocks_admission(governed):
+    g, _, _ = governed
+    g.set_budget(
+        "bulk",
+        TaskBudget(
+            token_limit=10000,
+            run_token_limit=10000,
+            project="history",
+            run_cost_usd=100,
+            reference_cost_limit=10,
+        ),
+    )
+    first = start(g)
+    g.report(
+        "bulk",
+        first["run_id"],
+        RunUsage(sequence=0, tokens=10, cost_usd=6, final=True, complete=True, reason="completed"),
+    )
+    second = start(g, request_id="resume")
+    assert second["reference_cost_remaining"] == 4
+    permitted = g.report("bulk", second["run_id"], RunUsage(sequence=0, tokens=10, cost_usd=3))
+    assert permitted["can_spend"]
+    stopped = g.report("bulk", second["run_id"], RunUsage(sequence=1, tokens=20, cost_usd=4))
+    assert stopped["reason"] == "reference_cost_exhausted"
+    g.report(
+        "bulk",
+        second["run_id"],
+        RunUsage(sequence=2, tokens=20, cost_usd=4, final=True, complete=True, reason="budget"),
+    )
+    assert start(g, request_id="third")["reason"] == "reference_cost_exhausted"
+    assert len(g.overview()["runs"]) == 2
+
+
+def test_lowering_reference_cost_limit_stops_existing_run(governed):
+    g, _, _ = governed
+    run = start(g)
+    g.report("bulk", run["run_id"], RunUsage(sequence=0, tokens=10, cost_usd=0.5))
+    g.set_budget("bulk", TaskBudget(token_limit=10000, project="history", reference_cost_limit=0.4))
+    assert g.status("bulk", run["run_id"])["reason"] == "reference_cost_exhausted"
+
+
+def test_reported_cost_limit_is_provider_independent(governed):
+    g, _, _ = governed
+    run = start(g)
+    assert (
+        g.report("bulk", run["run_id"], RunUsage(sequence=0, tokens=10, cost_usd=1))["reason"]
+        == "cost_budget_exhausted"
+    )
+
+
+def test_no_default_deadline_but_quota_and_explicit_limits_still_apply(governed, observe):
+    g, _, clock = governed
+    run = start(g)
+    assert run["expires_at"] is None
+    # Keep a live heartbeat while passing the former fifteen-minute deadline.
+    for sequence in range(200):
+        clock[0] += 5
+        observe(used=0)
+        assert g.report("bulk", run["run_id"], RunUsage(sequence=sequence, tokens=1))["can_spend"]
+    observe(used=99, observed_at=datetime.fromtimestamp(clock[0] + 1, UTC))
+    assert g.status("bulk", run["run_id"])["reason"] == "protecting_account_reserve"
+
+
+def test_explicit_deadline_still_applies(governed):
+    g, _, clock = governed
+    g.set_budget("bulk", TaskBudget(token_limit=1000, project="history", max_run_seconds=2))
+    run = start(g)
+    clock[0] += 3
+    assert g.status("bulk", run["run_id"])["reason"] == "time_limit"

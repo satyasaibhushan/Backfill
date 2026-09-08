@@ -142,8 +142,9 @@ class PauseUntil(Contract):
 class TaskBudget(ProjectBudget):
     project: Key | None = None
     run_token_limit: int = Field(default=100000, ge=1, le=10**9)
-    max_run_seconds: int = Field(default=600, ge=1, le=86400)
+    max_run_seconds: int | None = Field(default=None, ge=1, le=86400)
     run_cost_usd: PositiveAmount = 1
+    reference_cost_limit: PositiveAmount | None = None
 
 
 class RunStart(Contract):

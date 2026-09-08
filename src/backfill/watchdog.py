@@ -8,8 +8,8 @@ from contextlib import suppress
 
 
 def watch(parent: int, group: int, seconds: float) -> None:
-    deadline = time.monotonic() + seconds
-    while os.getppid() == parent and time.monotonic() < deadline:
+    deadline = time.monotonic() + seconds if seconds >= 0 else None
+    while os.getppid() == parent and (deadline is None or time.monotonic() < deadline):
         # The group leader is an unreaped child of our living parent. Its PID cannot
         # be reused while this ownership relationship holds.
         try:

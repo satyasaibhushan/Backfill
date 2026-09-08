@@ -162,7 +162,6 @@ class External:
                 TaskBudget(
                     token_limit=10**12,
                     run_token_limit=1000000,
-                    max_run_seconds=900,
                     run_cost_usd=30,
                 ),
             )
@@ -223,7 +222,6 @@ class External:
                 TaskBudget(
                     token_limit=10**12,
                     run_token_limit=1000000,
-                    max_run_seconds=900,
                     run_cost_usd=30,
                     paused=True,
                 ),

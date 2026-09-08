@@ -224,16 +224,7 @@ async def guard(
                                     "resume requires a thread previously metered under this key"
                                 )
                             pending_threads[event["id"]] = method
-                        elif method and (
-                            method in ("thread/goal/set", "thread/goal/clear")
-                            or method
-                            in (
-                                "thread/fork",
-                                "thread/realtime/start",
-                                "thread/rollback",
-                                "thread/compact/start",
-                            )
-                        ):
+                        elif method in ("thread/fork", "thread/realtime/start", "thread/rollback"):
                             raise UsageError(
                                 "operation can reset accounting or start unmetered work"
                             )
@@ -317,7 +308,11 @@ async def guard(
                 "backfill.watchdog",
                 str(os.getpid()),
                 str(process.pid),
-                str(max(0, permit["expires_at"] - time.time())),
+                str(
+                    max(0, permit["expires_at"] - time.time())
+                    if permit["expires_at"] is not None
+                    else -1
+                ),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,

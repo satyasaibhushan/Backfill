@@ -108,6 +108,16 @@ class Governor:
             return "protecting_account_reserve"
         return None
 
+    @staticmethod
+    def _reference_remaining(db, key: str, config: TaskBudget, exclude: str = ""):
+        if config.reference_cost_limit is None:
+            return None
+        spent = db.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) FROM native_runs WHERE workload=? AND id<>?",
+            (key, exclude),
+        ).fetchone()[0]
+        return max(0, config.reference_cost_limit - spent)
+
     def start(self, key: str, request: RunStart) -> dict:
         now = self.quota.clock()
         with self.quota.database.transaction() as db:
@@ -131,6 +141,8 @@ class Governor:
                 }
             config, remaining, reason = self._capacity(db, key)
             reason = reason or self._gate(db, key)
+            if self._reference_remaining(db, key, config) == 0:
+                reason = reason or "reference_cost_exhausted"
             if not remaining:
                 reason = reason or "token_budget_exhausted"
             active = db.execute(
@@ -157,7 +169,7 @@ class Governor:
                     config.run_cost_usd,
                     now,
                     now,
-                    now + config.max_run_seconds,
+                    now + config.max_run_seconds if config.max_run_seconds is not None else 0,
                 ),
             )
             response = self._status(db, self._run(db, key, run_id))
@@ -185,15 +197,27 @@ class Governor:
         reason = reason or self._gate(db, row["workload"])
         allocation = min(remaining, row["allocated"], config.run_token_limit)
         now = self.quota.clock()
+        deadlines = [
+            value
+            for value in (
+                row["expires_at"] or None,
+                row["created_at"] + config.max_run_seconds
+                if config.max_run_seconds is not None
+                else None,
+            )
+            if value is not None
+        ]
+        expires_at = min(deadlines) if deadlines else None
+        reference_remaining = self._reference_remaining(db, row["workload"], config, row["id"])
+        if reference_remaining is not None and row["cost_usd"] >= reference_remaining:
+            reason = "reference_cost_exhausted"
         if row["state"] != "active":
             reason = row["reason"]
-        elif now >= min(row["expires_at"], row["created_at"] + config.max_run_seconds):
+        elif expires_at is not None and now >= expires_at:
             reason = "time_limit"
         elif row["tokens"] >= allocation:
             reason = "token_budget_exhausted"
-        elif row["provider"] == "claude" and row["cost_usd"] >= min(
-            row["cost_limit"], config.run_cost_usd
-        ):
+        elif row["cost_usd"] >= min(row["cost_limit"], config.run_cost_usd):
             reason = "cost_budget_exhausted"
         return {
             "run_id": row["id"],
@@ -203,9 +227,14 @@ class Governor:
             "state": row["state"],
             "token_allowance": allocation,
             "tokens": row["tokens"],
+            "reference_cost_remaining": (
+                max(0, reference_remaining - row["cost_usd"])
+                if reference_remaining is not None
+                else None
+            ),
             "cost_usd": row["cost_usd"],
             "cost_limit_usd": min(row["cost_limit"], config.run_cost_usd),
-            "expires_at": min(row["expires_at"], row["created_at"] + config.max_run_seconds),
+            "expires_at": expires_at,
             "heartbeat_seconds": HEARTBEAT_SECONDS,
             "session_id": row["session_id"],
             "overrun_tokens": max(0, row["tokens"] - allocation),

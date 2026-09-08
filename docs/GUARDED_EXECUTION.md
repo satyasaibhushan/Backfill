@@ -66,7 +66,13 @@ Total token limits are lifetime ceilings across runs, until the owner increases 
 There is no automatic spending reset on a process restart. Projects share a ceiling
 across their tasks and providers. Native counts include cached input; they are not
 price-normalized. The cost limit is an additional native estimated-dollar cap for
-Claude only, not authoritative billing or a subscription-percentage conversion.
+either provider when reported, not authoritative billing or a subscription-percentage conversion.
+An optional `reference_cost_limit` caps cumulative reported cost for one workload across
+resumes. It is a lifetime amount, not a weekly allowance. The automatic subscription
+calibration and model-price reporting are not yet connected to this enforcement path.
+
+`max_run_seconds` is optional. Dashboard and application tasks have no automatic time
+cutoff. Budget waits retain their context and do not become failures after three attempts.
 
 The caller can use the local owner credential or a scoped task credential file.
 Workers cannot raise their own budgets or change priority. The credentials generated
@@ -109,9 +115,9 @@ Importing an existing unmetered thread is refused because its baseline is unknow
 Native delegation features are disabled for guarded processes, and attempts to
 re-enable them are refused. App-server descendants
 do not have a verified complete usage subscription here. Caller-managed parallel
-agents can register separate tasks under one shared project budget. Native goal loops,
-realtime sessions, fork, and reset operations that escape accounting are refused.
-The adapter does not silently turn a normal turn into an autonomous goal loop.
+agents can register separate tasks under one shared project budget. Native compaction and goal commands pass through. Counter resets retain previously
+counted tokens. Realtime sessions, forks, and rollback remain outside this adapter's
+accounting contract.
 
 ## Enforcement contract
 
@@ -122,7 +128,7 @@ The adapter does not silently turn a normal turn into an autonomous goal loop.
 - The guard checks policy every second and before forwarded native turns. Pause,
   lower budget, stale meter, or exhausted headroom stops its private process group.
 - A lost connection stops the guard after the local request timeout. No new allowance
-  is granted based on a failed refresh. Process time limits also stop silent runtimes.
+  is granted based on a failed refresh. Explicitly configured process time limits also stop silent runtimes.
 - Token and cost stops happen at observable usage boundaries. An in-flight request
   can exceed a ceiling before its usage arrives. This is **bounded execution with
   observed-usage interruption**, not a provider-side exact token or percentage cap.

@@ -32,6 +32,8 @@ class Usage:
         self.messages: dict[str, dict] = {}
         self.streams: dict[str, str] = {}
         self.counters: dict[str, int] = {}
+        self.raw_counters: dict[str, int] = {}
+        self.counter_offsets: dict[str, int] = {}
         self.details: dict[str, InferenceUsage] = {}
         self.message_models: dict[str, str | None] = {}
 
@@ -57,9 +59,13 @@ class Usage:
                 # Previous processes are already charged by the governor.
                 key = params["threadId"]
                 total = count(params["tokenUsage"]["total"]["totalTokens"])
-                if total < self.counters.get(key, 0):
-                    raise UsageError("native cumulative counter decreased")
-                self.counters[key] = total
+                if total < self.raw_counters.get(key, 0):
+                    # A native reset must not erase already metered work or kill compaction.
+                    self.counter_offsets[key] = self.counters[key]
+                    if key in self.details:
+                        self.details[f"{key}:epoch:{self.counters[key]}"] = self.details.pop(key)
+                self.raw_counters[key] = total
+                self.counters[key] = self.counter_offsets.get(key, 0) + total
                 self.tokens = sum(self.counters.values())
                 self.seen = True
                 raw = params["tokenUsage"]["total"]

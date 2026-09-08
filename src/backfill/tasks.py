@@ -574,9 +574,6 @@ class Tasks:
             due = row["due"]
             if state == "waiting":
                 due = max(due, self.now() + 60)
-                if row["attempt"] >= 3:
-                    state = "failed"
-                    reason = "Stopped three times. Review the partial result before retrying."
             db.execute(
                 "UPDATE jobs SET state=?,reason=?,updated=?,due=? WHERE id=?",
                 (state, reason, self.now(), due, key),

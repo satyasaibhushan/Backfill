@@ -293,3 +293,15 @@ def test_auto_retry_reselects_provider_but_explicit_selection_stays(tasks):
     clock[0] += 7 * 86400 + 1
     observe("codex", 1, offset=7)
     assert app.select(job)[0] == "codex"
+
+
+def test_capacity_wait_does_not_become_failure_after_three_attempts(tasks):
+    app, clock, _ = tasks
+    job = new(app)
+    for _ in range(5):
+        attempt = app.start(job["id"], "claude")
+        assert attempt
+        app.finish(job["id"], attempt["id"], "waiting", "Allowance reached")
+        assert app.get(job["id"])["state"] == "waiting"
+        clock[0] += 61
+    assert app.get(job["id"])["attempt"] == 5
