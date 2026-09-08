@@ -239,6 +239,20 @@ class Tasks:
     def public(row) -> dict:
         return {**dict(row), **json.loads(row["config"]), "config": None}
 
+    def continuation(self, key: str) -> dict | None:
+        with self.quota.database.transaction() as db:
+            row = db.execute(
+                "SELECT provider,session_id FROM native_runs "
+                "WHERE workload IN (?,?,?,?) AND session_id IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                tuple(
+                    f"{prefix}.{key}.{provider}"
+                    for prefix in ("ext", "job")
+                    for provider in ("codex", "claude")
+                ),
+            ).fetchone()
+        return dict(row) if row else None
+
     def get(self, key: str) -> dict:
         with self.quota.database.transaction() as db:
             result = self.public(self._job(db, key))
@@ -253,6 +267,7 @@ class Tasks:
             result["consumption"] = self.consumption(db).get(
                 key, {"windows": [], "incomplete": True}
             )
+        result["continuation"] = self.continuation(key)
         return result
 
     def update(self, key: str, value: TaskInput) -> dict:
@@ -386,7 +401,8 @@ class Tasks:
         if prefs.paused or (prefs.paused_until and prefs.paused_until.timestamp() > self.now()):
             return None, "All work is paused."
         overview = self.quota.overview()
-        preferred = job["provider"]
+        continuation = self.continuation(job["id"])
+        preferred = continuation["provider"] if continuation else job["provider"]
         candidates = []
         blockers = []
         for account in overview["accounts"]:

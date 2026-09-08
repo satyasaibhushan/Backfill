@@ -140,3 +140,30 @@ def test_approval_wait_does_not_start_again_automatically(tasks):
             "UPDATE jobs SET state='waiting',reason='Needs human approval' WHERE id=?", (job["id"],)
         )
     assert service.start(principal, job["id"])["reason"] == "Needs human approval"
+
+
+def test_continuation_keeps_the_metered_provider_and_session(tasks):
+    app, clock, observe, governor, service, principal = connected(tasks)
+    job = register(service, principal, provider="auto")
+    permit = service.start(principal, job["id"])
+    run = governor.start(
+        permit["workload"], RunStart(request_id="native", provider=permit["provider"])
+    )
+    governor.report(
+        permit["workload"],
+        run["run_id"],
+        RunUsage(
+            sequence=1,
+            tokens=30,
+            session_id="saved-thread",
+            final=True,
+            complete=True,
+            counters={"saved-thread": 30},
+        ),
+    )
+    app.finish(job["id"], app.get(job["id"])["attempts"][0]["id"], "waiting", "budget")
+    saved = app.get(job["id"])["continuation"]
+    assert saved == {"provider": permit["provider"], "session_id": "saved-thread"}
+    assert app.select(app.get(job["id"]))[0] == permit["provider"]
+    other = register(service, principal, request="different")
+    assert app.get(other["id"])["continuation"] is None

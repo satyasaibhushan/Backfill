@@ -74,6 +74,7 @@ def test_submit_execute_review_and_revise_through_actual_guard(provider, access,
         executable = root / "native"
         executable.write_text(f"""#!{sys.executable}
 import sys,json
+from pathlib import Path
 
 def emit(value):print(json.dumps(value),flush=True)
 if "-p" in sys.argv:
@@ -84,16 +85,24 @@ if "-p" in sys.argv:
     assert ("mcp__*" in granted)==({access!r}=="edit")
     mode=sys.argv[sys.argv.index("--permission-mode")+1]
     assert mode==("acceptEdits" if {access!r}=="edit" else "dontAsk")
+    marker=Path({str(root / "session-created")!r})
+    if marker.exists(): assert sys.argv[sys.argv.index("--resume")+1]=="thread-one"
+    marker.write_text("created")
     prompt=sys.stdin.read()
     text="Verified result: " + (
         "revision includes evidence" if "Reviewer feedback" in prompt else "seven files reviewed"
     )
-    emit({{"type":"result","result":text,"is_error":False,"modelUsage":{{"native":{{"inputTokens":20,"outputTokens":10}}}},"total_cost_usd":0.01}})
+    emit({{"type":"result","session_id":"thread-one","result":text,"is_error":False,"modelUsage":{{"native":{{"inputTokens":20,"outputTokens":10}}}},"total_cost_usd":0.01}})
 else:
     for line in sys.stdin:
         event=json.loads(line);method=event.get("method")
         if method=="initialize":emit({{"id":event["id"],"result":{{}}}})
-        elif method=="thread/start":
+        elif method in ("thread/start", "thread/resume"):
+            marker=Path({str(root / "session-created")!r})
+            assert (method=="thread/resume")==marker.exists()
+            marker.write_text("created")
+            resumed=method=="thread/resume"
+            if resumed: assert event["params"]["threadId"]=="thread-one"
             assert event["params"]["approvalPolicy"]=="never"
             assert event["params"]["model"]=="gpt-5.6-luna"
             expected="workspace-write" if {access!r}=="edit" else "read-only"
@@ -108,7 +117,9 @@ else:
             )
             emit({{"id":event["id"],"result":{{"turn":{{"id":"turn-one"}}}}}})
             emit({{"method":"turn/started","params":{{"threadId":"thread-one"}}}})
-            emit({{"method":"thread/tokenUsage/updated","params":{{"threadId":"thread-one","tokenUsage":{{"total":{{"totalTokens":30}}}}}}}})
+            usage={{"total":{{"totalTokens":60 if resumed else 30}}}}
+            emit({{"method":"thread/tokenUsage/updated",
+                  "params":{{"threadId":"thread-one","tokenUsage":usage}}}})
             progress="Progress chatter"
             emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":progress}}}}}})
             emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":text}}}}}})
@@ -212,6 +223,31 @@ else:
                     )
                     record = client.get("/v2/tasks/" + final["task_id"]).json()
                     assert len(record["attempts"]) == 1
+                    assert (
+                        client.post(
+                            "/v2/tasks/" + final["task_id"] + "/actions",
+                            json={"action": "revise", "feedback": "Add evidence"},
+                        ).status_code
+                        == 200
+                    )
+                    resumed = subprocess.run(
+                        args,
+                        input=json.dumps(request),
+                        text=True,
+                        capture_output=True,
+                        env=env,
+                        timeout=20,
+                    )
+                    assert resumed.returncode == 0, resumed.stderr
+                    continued = json.loads(resumed.stdout.strip().splitlines()[-1])
+                    assert continued["state"] == "review", continued
+                    assert "revision includes evidence" in continued["output"]
+                    assert (
+                        client.get("/v2/tasks/" + final["task_id"]).json()["continuation"][
+                            "session_id"
+                        ]
+                        == "thread-one"
+                    )
                     return
                 result = client.post(
                     "/v2/tasks",

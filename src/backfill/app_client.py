@@ -143,6 +143,8 @@ async def execute(connection_path, request):
             )
             return 0
         provider = permit["provider"]
+        continuation = job.get("continuation")
+        session_id = continuation["session_id"] if continuation else None
         cwd = (
             str(Path(job["folder"]).expanduser())
             if job["folder"]
@@ -155,7 +157,14 @@ async def execute(connection_path, request):
         prompt = job["instructions"]
         if job.get("output"):
             prompt += "\n\nSaved progress, continue from here:\n" + job["output"][-30000:]
-        output, reason, state = "", "", "failed"
+        if session_id:
+            prompt = (
+                "Continue the interrupted task from this session’s existing context. "
+                "Check interrupted commands before retrying. Do not repeat completed work."
+            )
+        if session_id and job.get("feedback"):
+            prompt += "\nReviewer feedback:\n" + job["feedback"]
+        output, reason, state = job.get("output", ""), "", "failed"
         completed, denied = False, False
         summary = {}
         process = None
@@ -178,6 +187,8 @@ async def execute(connection_path, request):
                 from backfill.tool_access import claude_permissions
 
                 command += claude_permissions(job["access"], settings)
+                if session_id:
+                    command += ["--resume", session_id]
             env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -245,8 +256,9 @@ async def execute(connection_path, request):
                         await send(
                             {
                                 "id": 2,
-                                "method": "thread/start",
+                                "method": "thread/resume" if session_id else "thread/start",
                                 "params": {
+                                    **({"threadId": session_id} if session_id else {}),
                                     "cwd": cwd,
                                     "model": settings.codex_task_model,
                                     "config": codex_permissions(job["access"], settings),

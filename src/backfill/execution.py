@@ -70,6 +70,8 @@ class Execution:
         output = ""
         try:
             provider = attempt["provider"]
+            continuation = self.tasks.continuation(job["id"])
+            session_id = continuation["session_id"] if continuation else None
             settings = self.tasks.settings
             workspace = self.tasks.workspace(job["id"])
             cwd = job["folder"] or str(workspace)
@@ -116,6 +118,13 @@ class Execution:
                     "\n\nPrevious partial work, continue without repeating it:\n"
                     + job["output"][-24000:]
                 )
+            if session_id:
+                prompt = (
+                    "Continue from this session’s existing context. "
+                    "Check interrupted commands before retrying. Do not repeat completed work."
+                )
+                if job["feedback"]:
+                    prompt += "\nReviewer feedback:\n" + job["feedback"]
             command = [
                 sys.executable,
                 "-m",
@@ -130,6 +139,8 @@ class Execution:
                 from backfill.tool_access import claude_permissions
 
                 command += claude_permissions(job["access"], settings)
+                if session_id:
+                    command += ["--resume", session_id]
             env = {**os.environ, "BACKFILL_DATA_DIR": str(settings.root)}
             # An editable install or a source deployment must resolve in task folders too.
             from pathlib import Path
@@ -190,8 +201,9 @@ class Execution:
                             await send(
                                 {
                                     "id": 2,
-                                    "method": "thread/start",
+                                    "method": "thread/resume" if session_id else "thread/start",
                                     "params": {
+                                        **({"threadId": session_id} if session_id else {}),
                                         "cwd": cwd,
                                         "model": settings.codex_task_model,
                                         "config": codex_permissions(job["access"], settings),
