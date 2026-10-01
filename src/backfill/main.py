@@ -10,13 +10,14 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backfill.auth import owner_token
 from backfill.config import Settings, load_settings
 from backfill.database import Database
 from backfill.execution import Execution
-from backfill.external import External
+from backfill.external import AppProgress, External, execution_task, validate_request
 from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.quota import QuotaError, QuotaService
@@ -181,9 +182,9 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
 
     @app.post("/v2/external/tasks")
     async def external_register(request: Request, principal: Annotated[dict, Depends(application)]):
-        body = await request.json()
+        body = validate_request(await external_json(request, 256 * 1024))
         return request.app.state.external.register(
-            principal, body.get("request_id"), body.get("task", {})
+            principal, body.request_id, execution_task(body).model_dump(mode="json")
         )
 
     @app.post("/v2/external/tasks/{key}/start")
@@ -201,7 +202,22 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
     async def external_progress(
         key: str, request: Request, principal: Annotated[dict, Depends(application)]
     ):
-        return request.app.state.external.update(principal, key, await request.json())
+        try:
+            body = AppProgress.model_validate(await external_json(request, 4 * 1024 * 1024))
+        except ValidationError as exc:
+            raise QuotaError("Invalid app progress", 422) from exc
+        return request.app.state.external.update(principal, key, body.model_dump(exclude_none=True))
+
+    async def external_json(request: Request, limit: int):
+        payload = bytearray()
+        async for chunk in request.stream():
+            if len(payload) + len(chunk) > limit:
+                raise QuotaError("App payload exceeds limit", 413)
+            payload.extend(chunk)
+        try:
+            return json.loads(payload)
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise QuotaError("Invalid app JSON", 422) from exc
 
     @app.get("/v1/status", dependencies=owned)
     def overview(service: Quota, request: Request) -> dict:

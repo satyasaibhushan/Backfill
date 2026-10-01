@@ -181,6 +181,11 @@ else:
                     )
                     request = {
                         "request_id": "request-one",
+                        "context_snapshot": {
+                            "version": 1,
+                            "task_id": "source-task-one",
+                            "markdown": "Project plan and repository references from Task Finder.",
+                        },
                         "task": {
                             "title": "Inspect files",
                             "instructions": "Review seven files",
@@ -208,6 +213,11 @@ else:
                     assert result.returncode == 0, result.stderr + result.stdout
                     final = json.loads(result.stdout.strip().splitlines()[-1])
                     assert final["state"] == "review", final
+                    assert final["request_id"] == request["request_id"]
+                    assert final["source_task_id"] == "source-task-one"
+                    initial = json.loads(result.stdout.strip().splitlines()[0])
+                    assert initial["type"] == "progress" and initial["state"] == "running"
+                    assert initial["task_id"] == final["task_id"]
                     assert "Verified result" in final["output"]
                     retry = subprocess.run(
                         args,
