@@ -60,8 +60,14 @@ def parser() -> argparse.ArgumentParser:
     local_connection.add_argument("--project", required=True)
     local_connection.add_argument("--key", required=True)
     app_run = commands.add_parser("run-app", help="guard a run owned by an application")
-    app_run.add_argument("--connection", type=Path, required=True)
+    app_run.add_argument("--connection", type=Path)
     app_run.add_argument("--json", default="-")
+    app_run.add_argument(
+        "--dry-run", action="store_true", help="validate only; no credentials or execution"
+    )
+    app_status = commands.add_parser("app-status", help="inspect an existing app connection or run")
+    app_status.add_argument("--connection", type=Path, required=True)
+    app_status.add_argument("--task-id", help="Backfill task ID returned by run-app")
     commands.add_parser("worker", help="maintain the outbound website connection")
     commands.add_parser("init", help="create private owner credential and data directory")
     commands.add_parser("serve", help="serve quota API on a private Unix socket")
@@ -120,9 +126,20 @@ def run(args: argparse.Namespace) -> int:
         emit(connect_local(settings, args.project, args.key))
         return 0
     if args.command == "run-app":
-        from backfill.app_client import execute
+        from backfill.app_client import execute, validate_app_request
 
-        return asyncio.run(execute(args.connection, read_json(args.json)))
+        request = read_json(args.json)
+        if args.dry_run:
+            emit(validate_app_request(request))
+            return 0
+        if not args.connection:
+            raise QuotaError("run-app requires an existing --connection; use --dry-run to validate")
+        return asyncio.run(execute(args.connection, request))
+    if args.command == "app-status":
+        from backfill.app_client import app_status
+
+        emit(app_status(args.connection, args.task_id))
+        return 0
     if args.command == "connect":
         from backfill.worker import connect
 

@@ -17,6 +17,8 @@ from backfill.providers.process import stop_probe
 from backfill.quota import QuotaError
 from backfill.usage import Usage, UsageError
 
+EOF_EXIT_GRACE = 0.5
+
 
 async def guard(
     key: str, provider: str, arguments: list[str], settings: Settings, token: str
@@ -328,8 +330,19 @@ async def guard(
             ]
             # EOF on input is normal. A failure in either stream must end the process.
             active = set(jobs)
+            exit_deadline = None
             while active:
-                done, active = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+                done, active = await asyncio.wait(
+                    active,
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=None if exit_deadline is None else max(0, exit_deadline - loop.time()),
+                )
+                if not done:
+                    # A metered final event is not permission to keep running with
+                    # stdout closed. Preserve uncertain accounting if exit never arrives.
+                    usage.complete = False
+                    reason = "unmetered"
+                    break
                 failure = next(
                     (t.exception() for t in done if not t.cancelled() and t.exception()), None
                 )
@@ -351,8 +364,15 @@ async def guard(
                         )
                     break
                 if jobs[0] in done and process.returncode is None:
-                    reason = "unmetered"
-                    break
+                    if not (
+                        usage.complete and usage.seen and not usage.failed and not busy_threads
+                    ):
+                        reason = "unmetered"
+                        break
+                    # Pipe EOF can precede asyncio's child-exit notification. Give a
+                    # fully metered completion a bounded chance to settle while still
+                    # watching policy stops, stream failures and the watchdog.
+                    exit_deadline = loop.time() + EOF_EXIT_GRACE
         finally:
             for sig in (signal.SIGTERM, signal.SIGINT):
                 loop.remove_signal_handler(sig)

@@ -13,6 +13,8 @@ import httpx
 
 from backfill.auth import private_directory, read_secret, write_secret
 from backfill.config import load_settings
+from backfill.external import APP_OUTPUT_LIMIT, execution_task, validate_request
+from backfill.quota import QuotaError
 from backfill.tool_access import codex_permissions
 from backfill.worker import check_server
 
@@ -100,7 +102,70 @@ def emit(value):
     print(json.dumps(value), flush=True)
 
 
-async def execute(connection_path, request):
+def validate_app_request(request):
+    value = validate_request(request)
+    execution_task(value)
+    return {
+        "type": "validation",
+        "valid": True,
+        "execution": False,
+        "request_id": value.request_id,
+        "provider": value.task.provider,
+        "access": value.task.access,
+        "allowance": value.task.allowance,
+        "schedule": "once",
+        "source_task_id": value.context_snapshot.task_id if value.context_snapshot else None,
+    }
+
+
+def app_status(connection_path, task_id=None):
+    """Inspect one existing connection or run without registration or admission."""
+    if task_id is not None:
+        from pydantic import TypeAdapter
+
+        from backfill.schemas import Key
+
+        TypeAdapter(Key).validate_python(task_id)
+    config = json.loads(read_secret(connection_path))
+    with httpx.Client(
+        transport=httpx.HTTPTransport(uds=str(Path(config["root"]) / "quota.sock")),
+        base_url="http://backfill",
+        timeout=15,
+        headers={"Authorization": "Bearer " + config["credential"]},
+    ) as client:
+        response = client.get("/v2/external/tasks/" + task_id if task_id else "/v2/external")
+        if response.status_code in (401, 404):
+            raise QuotaError("App connection or run is unavailable", response.status_code)
+        response.raise_for_status()
+        return response.json()
+
+
+async def execute(connection_path, request, *, on_event=None):
+    value = validate_request(request)
+    # Context is sent once in the canonical task instructions, not as a second task store.
+    request = value.model_dump(mode="json", exclude_none=True)
+    request.pop("context_snapshot", None)
+    request["task"] = execution_task(value).model_dump(mode="json")
+    output_event = on_event or emit
+    output_truncated = False
+
+    def retain_output(text):
+        nonlocal output_truncated
+        output_truncated |= len(text) > APP_OUTPUT_LIMIT
+        return text[-APP_OUTPUT_LIMIT:]
+
+    def report(value):
+        output_event(
+            {
+                **value,
+                "request_id": request["request_id"],
+                "output_truncated": output_truncated,
+                **source,
+            }
+        )
+
+    source = {"source_task_id": value.context_snapshot.task_id} if value.context_snapshot else {}
+
     settings = load_settings()
     config = json.loads(read_secret(connection_path))
     root = Path(config["root"])
@@ -117,9 +182,10 @@ async def execute(connection_path, request):
             return response.json()
 
         job = await call("/v2/external/tasks", request)
+        job["output"] = retain_output(job["output"])
         base = "/v2/external/tasks/" + job["id"]
         if job["state"] in ("review", "done", "failed", "cancelled", "paused"):
-            emit(
+            report(
                 {
                     "type": "result",
                     "state": job["state"],
@@ -132,7 +198,7 @@ async def execute(connection_path, request):
             return 0
         permit = await call(base + "/start", {})
         if permit["decision"] != "granted":
-            emit(
+            report(
                 {
                     "type": "result",
                     "state": "waiting",
@@ -143,6 +209,15 @@ async def execute(connection_path, request):
             )
             return 0
         provider = permit["provider"]
+        report(
+            {
+                "type": "progress",
+                "state": "running",
+                "provider": provider,
+                "output": job["output"],
+                "task_id": job["id"],
+            }
+        )
         continuation = job.get("continuation")
         session_id = continuation["session_id"] if continuation else None
         cwd = (
@@ -227,9 +302,10 @@ async def execute(connection_path, request):
                 while process.returncode is None:
                     await asyncio.sleep(3)
                     await call(base + "/progress", {"output": output})
-                    emit(
+                    report(
                         {
                             "type": "progress",
+                            "state": "running",
                             "output": output,
                             "provider": provider,
                             "task_id": job["id"],
@@ -242,13 +318,17 @@ async def execute(connection_path, request):
                     event = json.loads(line)
                     if provider == "claude":
                         if event.get("type") == "assistant":
-                            output += "\n\n" + "\n".join(
-                                p.get("text", "")
-                                for p in event.get("message", {}).get("content", [])
-                                if p.get("type") == "text"
+                            output = retain_output(
+                                output
+                                + "\n\n"
+                                + "\n".join(
+                                    p.get("text", "")
+                                    for p in event.get("message", {}).get("content", [])
+                                    if p.get("type") == "text"
+                                )
                             )
                         if event.get("type") == "result":
-                            output = event.get("result") or output
+                            output = retain_output(event.get("result") or output)
                             completed = not event.get("is_error")
                             denied = bool(event.get("permission_denials"))
                     elif event.get("id") == 1 and "result" in event:
@@ -284,7 +364,7 @@ async def execute(connection_path, request):
                     elif event.get("method") == "item/completed":
                         item = event.get("params", {}).get("item", {})
                         if item.get("type") == "agentMessage":
-                            output = item.get("text", "")
+                            output = retain_output(item.get("text", ""))
                     elif event.get("method") == "turn/completed":
                         completed = (
                             event.get("params", {}).get("turn", {}).get("status") == "completed"
@@ -368,7 +448,7 @@ async def execute(connection_path, request):
                 if exc.response.status_code != 409 or retry == 4:
                     raise
                 await asyncio.sleep(1)
-        emit(
+        report(
             {
                 "type": "result",
                 "state": state,

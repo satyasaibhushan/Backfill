@@ -62,6 +62,12 @@ and `cancel`. Revisions include `feedback`; pauses may include an ISO timestamp 
 External executors can also use the independent quota API and native process guards.
 See [quota API](docs/QUOTA_API.md) and [guarded execution](docs/GUARDED_EXECUTION.md).
 
+For an already connected application's manual Run, reuse `backfill run-app`.
+`run-app --dry-run --json task.json` validates without credentials or execution;
+`app-status --connection /private/path/connection.json` checks the selected
+connection. See the [Task Finder manual-run contract](docs/TASKFINDER_MANUAL_RUN.md)
+for one task → guarded run → result on the same task → human review.
+
 ## Allowances and permissions
 
 The default personal reserve is 30%. A task may use up to 5 percentage points of
