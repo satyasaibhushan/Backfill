@@ -83,8 +83,11 @@ def execution_task(request: AppRequest):
         raise QuotaError("Task instructions and context exceed the task limit", 422) from exc
 
 
+APP_OUTPUT_LIMIT = 1000000
+
+
 class AppProgress(Contract):
-    output: str | None = Field(default=None, max_length=1000000)
+    output: str | None = Field(default=None, max_length=APP_OUTPUT_LIMIT)
     state: Literal["review", "failed", "waiting", "paused"] | None = None
     reason: str = Field(default="", max_length=2000)
 

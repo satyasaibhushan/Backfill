@@ -13,7 +13,7 @@ import httpx
 
 from backfill.auth import private_directory, read_secret, write_secret
 from backfill.config import load_settings
-from backfill.external import execution_task, validate_request
+from backfill.external import APP_OUTPUT_LIMIT, execution_task, validate_request
 from backfill.quota import QuotaError
 from backfill.tool_access import codex_permissions
 from backfill.worker import check_server
@@ -147,9 +147,22 @@ async def execute(connection_path, request, *, on_event=None):
     request.pop("context_snapshot", None)
     request["task"] = execution_task(value).model_dump(mode="json")
     output_event = on_event or emit
+    output_truncated = False
+
+    def retain_output(text):
+        nonlocal output_truncated
+        output_truncated |= len(text) > APP_OUTPUT_LIMIT
+        return text[-APP_OUTPUT_LIMIT:]
 
     def report(value):
-        output_event({**value, "request_id": request["request_id"], **source})
+        output_event(
+            {
+                **value,
+                "request_id": request["request_id"],
+                "output_truncated": output_truncated,
+                **source,
+            }
+        )
 
     source = {"source_task_id": value.context_snapshot.task_id} if value.context_snapshot else {}
 
@@ -169,6 +182,7 @@ async def execute(connection_path, request, *, on_event=None):
             return response.json()
 
         job = await call("/v2/external/tasks", request)
+        job["output"] = retain_output(job["output"])
         base = "/v2/external/tasks/" + job["id"]
         if job["state"] in ("review", "done", "failed", "cancelled", "paused"):
             report(
@@ -304,13 +318,17 @@ async def execute(connection_path, request, *, on_event=None):
                     event = json.loads(line)
                     if provider == "claude":
                         if event.get("type") == "assistant":
-                            output += "\n\n" + "\n".join(
-                                p.get("text", "")
-                                for p in event.get("message", {}).get("content", [])
-                                if p.get("type") == "text"
+                            output = retain_output(
+                                output
+                                + "\n\n"
+                                + "\n".join(
+                                    p.get("text", "")
+                                    for p in event.get("message", {}).get("content", [])
+                                    if p.get("type") == "text"
+                                )
                             )
                         if event.get("type") == "result":
-                            output = event.get("result") or output
+                            output = retain_output(event.get("result") or output)
                             completed = not event.get("is_error")
                             denied = bool(event.get("permission_denials"))
                     elif event.get("id") == 1 and "result" in event:
@@ -346,7 +364,7 @@ async def execute(connection_path, request, *, on_event=None):
                     elif event.get("method") == "item/completed":
                         item = event.get("params", {}).get("item", {})
                         if item.get("type") == "agentMessage":
-                            output = item.get("text", "")
+                            output = retain_output(item.get("text", ""))
                     elif event.get("method") == "turn/completed":
                         completed = (
                             event.get("params", {}).get("turn", {}).get("status") == "completed"

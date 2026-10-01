@@ -15,6 +15,7 @@ import pytest
 from backfill.auth import owner_token, write_secret
 from backfill.config import Settings
 from backfill.database import Database
+from backfill.external import APP_OUTPUT_LIMIT
 from backfill.meter import Meter
 from backfill.quota import QuotaService
 from backfill.schemas import Observation, Window
@@ -23,7 +24,9 @@ from backfill.schemas import Observation, Window
 @pytest.mark.parametrize("external", [False, True])
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 @pytest.mark.parametrize("access", ["read", "edit"])
-def test_submit_execute_review_and_revise_through_actual_guard(provider, access, external):
+def test_submit_execute_review_and_revise_through_actual_guard(
+    provider, access, external, output_chars=0
+):
     with tempfile.TemporaryDirectory(prefix="task-", dir="/tmp") as directory:
         root = Path(directory)
         token = owner_token(root)
@@ -74,7 +77,7 @@ def test_submit_execute_review_and_revise_through_actual_guard(provider, access,
         )
         executable = root / "native"
         executable.write_text(f"""#!{sys.executable}
-import sys,json
+import sys,json,time
 from pathlib import Path
 
 def emit(value):print(json.dumps(value),flush=True)
@@ -93,6 +96,14 @@ if "-p" in sys.argv:
     text="Verified result: " + (
         "revision includes evidence" if "Reviewer feedback" in prompt else "seven files reviewed"
     )
+    if {output_chars}:
+        first="p" * ({output_chars}//2-2)
+        last="Progress tail"
+        second="p" * ({output_chars}-len(first)-4-len(last)) + last
+        for part in (first, second):
+            emit({{"type":"assistant","message":{{"content":[{{"type":"text","text":part}}]}}}})
+        time.sleep(3.5)
+        text="r" * ({output_chars}-len(text)) + text
     emit({{"type":"result","session_id":"thread-one","result":text,"is_error":False,"modelUsage":{{"native":{{"inputTokens":20,"outputTokens":10}}}},"total_cost_usd":0.01}})
 else:
     for line in sys.stdin:
@@ -122,7 +133,12 @@ else:
             emit({{"method":"thread/tokenUsage/updated",
                   "params":{{"threadId":"thread-one","tokenUsage":usage}}}})
             progress="Progress chatter"
+            if {output_chars}:
+                tail="Progress tail"
+                progress="p" * ({output_chars}-len(tail)) + tail
+                text="r" * ({output_chars}-len(text)) + text
             emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":progress}}}}}})
+            if {output_chars}: time.sleep(3.5)
             emit({{"method":"item/completed","params":{{"item":{{"type":"agentMessage","text":text}}}}}})
             emit({{"method":"turn/completed","params":{{"threadId":"thread-one","turn":{{"status":"completed"}}}}}})
 """)
@@ -219,6 +235,23 @@ else:
                     assert initial["type"] == "progress" and initial["state"] == "running"
                     assert initial["task_id"] == final["task_id"]
                     assert "Verified result" in final["output"]
+                    if output_chars:
+                        events = [json.loads(line) for line in result.stdout.strip().splitlines()]
+                        expected_length = min(output_chars, APP_OUTPUT_LIMIT)
+                        assert len(final["output"]) == expected_length
+                        assert final["output"].endswith("Verified result: seven files reviewed")
+                        assert final["output_truncated"] == (output_chars > APP_OUTPUT_LIMIT)
+                        assert all(len(e["output"]) <= APP_OUTPUT_LIMIT for e in events)
+                        assert any(
+                            e["type"] == "progress"
+                            and len(e["output"]) == expected_length
+                            and e["output"].endswith("Progress tail")
+                            for e in events
+                        )
+                        record = client.get("/v2/tasks/" + final["task_id"]).json()
+                        assert record["state"] == "review"
+                        assert record["output"] == final["output"]
+                        return
                     retry = subprocess.run(
                         args,
                         input=json.dumps(request),
@@ -338,3 +371,13 @@ else:
                 server.wait()
             server.stdout.close()
             server.stderr.close()
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+@pytest.mark.parametrize(
+    "output_chars", [APP_OUTPUT_LIMIT - 1, APP_OUTPUT_LIMIT, APP_OUTPUT_LIMIT + 1]
+)
+def test_external_long_output_persists_progress_and_correlated_review(provider, output_chars):
+    test_submit_execute_review_and_revise_through_actual_guard(
+        provider, "read", True, output_chars=output_chars
+    )
