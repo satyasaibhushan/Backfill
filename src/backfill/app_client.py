@@ -118,8 +118,16 @@ def validate_app_request(request):
     }
 
 
-def app_status(connection_path, task_id=None):
+def app_status(connection_path, task_id=None, *, request_id=None):
     """Inspect one existing connection or run without registration or admission."""
+    if task_id is not None and request_id is not None:
+        raise ValueError("Select one task or request ID")
+    if request_id is not None:
+        from pydantic import TypeAdapter
+
+        from backfill.external import RequestID
+
+        TypeAdapter(RequestID).validate_python(request_id)
     if task_id is not None:
         from pydantic import TypeAdapter
 
@@ -133,7 +141,14 @@ def app_status(connection_path, task_id=None):
         timeout=15,
         headers={"Authorization": "Bearer " + config["credential"]},
     ) as client:
-        response = client.get("/v2/external/tasks/" + task_id if task_id else "/v2/external")
+        path = (
+            "/v2/external/requests/" + request_id
+            if request_id is not None
+            else "/v2/external/tasks/" + task_id
+            if task_id
+            else "/v2/external"
+        )
+        response = client.get(path)
         if response.status_code in (401, 404):
             raise QuotaError("App connection or run is unavailable", response.status_code)
         response.raise_for_status()

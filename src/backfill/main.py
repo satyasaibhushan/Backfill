@@ -17,7 +17,7 @@ from backfill.auth import owner_token
 from backfill.config import Settings, load_settings
 from backfill.database import Database
 from backfill.execution import Execution
-from backfill.external import AppProgress, External, execution_task, validate_request
+from backfill.external import AppProgress, External, RequestID, execution_task, validate_request
 from backfill.governor import Governor
 from backfill.meter import Meter
 from backfill.quota import QuotaError, QuotaService
@@ -179,6 +179,12 @@ def create_app(settings: Settings | None = None, service: QuotaService | None = 
             None,
         )
         return {"project": project, "connected": project is not None}
+
+    @app.get("/v2/external/requests/{request_id}")
+    def external_request_status(
+        request_id: RequestID, request: Request, principal: Annotated[dict, Depends(application)]
+    ):
+        return request.app.state.external.status_request(principal, request_id)
 
     @app.post("/v2/external/tasks")
     async def external_register(request: Request, principal: Annotated[dict, Depends(application)]):

@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
@@ -35,10 +35,13 @@ class ContextSnapshot(Contract):
         return value
 
 
+RequestID = Annotated[str, Field(min_length=8, max_length=120, pattern=r"^[a-zA-Z0-9_.:-]+$")]
+
+
 class AppRequest(Contract):
     """The existing run-app envelope, shared by CLI validation and registration."""
 
-    request_id: str = Field(min_length=8, max_length=120, pattern=r"^[a-zA-Z0-9_.:-]+$")
+    request_id: RequestID
     task: TaskInput
     workspace: str = Field(default="", max_length=2000)
     context_snapshot: ContextSnapshot | None = None
@@ -179,6 +182,22 @@ class External:
             if not row:
                 raise QuotaError("Run not found", 404)
             return dict(row)
+
+    def status_request(self, principal, request):
+        """Read an existing app/request tuple without registration, admission or recovery."""
+        with self.tasks.quota.database.transaction() as db:
+            record = db.execute(
+                "SELECT * FROM external_jobs WHERE app=? AND request=?",
+                (principal["id"], request),
+            ).fetchone()
+        if record is None:
+            return {"found": False, "request_id": request}
+        return {
+            **self.tasks.get(record["job"]),
+            "found": True,
+            "request_id": record["request"],
+            "registered_task": json.loads(record["payload"]),
+        }
 
     def recover(self, principal, key):
         record = self.record(principal, key)

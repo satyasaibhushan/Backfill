@@ -140,3 +140,16 @@ guards, malformed/oversized payloads, revoked credentials and read/edit boundari
 A mocked Task Finder consumer receives the same task's result without reexecution.
 No real model request, live Task Finder task write, new credential, service setup,
 production deployment, merge or publication is part of verification.
+
+### Reconcile an interrupted launcher
+
+`backfill app-status --connection /private/path/app-connection.json --request-id TASKFINDER_RUN_UUID`
+reads the existing app/request registration without creating a task, starting,
+recovering or charging a run. It returns `found: false` when this application's
+request was never registered. A found result includes the existing task state,
+`request_id`, and the canonical `registered_task` payload for frozen-context
+correlation. Other application credentials cannot inspect that registration,
+even when their project is the same. Do not relaunch running or mismatched work;
+only an explicit reviewed retry may resume a waiting request. This lookup needs
+the updated Backfill CLI and daemon; existing credentials/provider setup remain
+unchanged.
