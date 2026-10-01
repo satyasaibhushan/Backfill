@@ -67,7 +67,11 @@ def parser() -> argparse.ArgumentParser:
     )
     app_status = commands.add_parser("app-status", help="inspect an existing app connection or run")
     app_status.add_argument("--connection", type=Path, required=True)
-    app_status.add_argument("--task-id", help="Backfill task ID returned by run-app")
+    status_target = app_status.add_mutually_exclusive_group()
+    status_target.add_argument("--task-id", help="Backfill task ID returned by run-app")
+    status_target.add_argument(
+        "--request-id", help="Inspect existing registration without execution"
+    )
     commands.add_parser("worker", help="maintain the outbound website connection")
     commands.add_parser("init", help="create private owner credential and data directory")
     commands.add_parser("serve", help="serve quota API on a private Unix socket")
@@ -138,7 +142,7 @@ def run(args: argparse.Namespace) -> int:
     if args.command == "app-status":
         from backfill.app_client import app_status
 
-        emit(app_status(args.connection, args.task_id))
+        emit(app_status(args.connection, args.task_id, request_id=args.request_id))
         return 0
     if args.command == "connect":
         from backfill.worker import connect

@@ -187,12 +187,28 @@ def test_app_status_is_read_only_and_revoked_connections_fail(connected, monkeyp
     monkeypatch.setattr(httpx, "Client", status_client)
     assert app_status(connection)["connected"]
     assert app_status(connection, job["id"])["state"] == "queued"
+    known = app_status(connection, request_id=request()["request_id"])
+    assert known["found"] and known["id"] == job["id"]
+    assert known["request_id"] == request()["request_id"]
+    assert known["registered_task"]["instructions"] == job["instructions"]
+    assert app_status(connection, request_id="missing-request") == {
+        "found": False,
+        "request_id": "missing-request",
+    }
+    # Neither read registers, starts, recovers, charges or changes a job.
+    assert len(client.app.state.tasks.list()["tasks"]) == 1
+    with pytest.raises(ValueError):
+        app_status(connection, request_id="../SECRET")
+    with pytest.raises(ValueError):
+        app_status(connection, job["id"], request_id=request()["request_id"])
     assert client.app.state.tasks.get(job["id"])["attempts"] == []
     with pytest.raises(ValueError):
         app_status(connection, "../other?token=SECRET")
     assert client.put("/v2/app-grants", headers=owner, json=[]).status_code == 200
     with pytest.raises(QuotaError, match="unavailable"):
         app_status(connection)
+    with pytest.raises(QuotaError, match="unavailable"):
+        app_status(connection, request_id=request()["request_id"])
 
 
 async def test_mock_taskfinder_receives_same_task_result_without_reexecution(
@@ -238,3 +254,40 @@ async def test_mock_taskfinder_receives_same_task_result_without_reexecution(
     assert calls == ["/v2/external/tasks"]
     assert client.app.state.tasks.get(job["id"])["state"] == "review"
     assert client.app.state.tasks.get(job["id"])["attempts"] == []
+
+
+def test_request_status_is_read_only_and_scoped_to_application(connected, monkeypatch):
+    client, owner, auth, _ = connected
+    job = client.post("/v2/external/tasks", headers=auth, json=request()).json()
+    grants = [
+        {
+            "id": "app-one",
+            "project": job["project"],
+            "hash": hashlib.sha256(b"mock-app-credential-never-live").hexdigest(),
+            "revoked": 0,
+        },
+        {
+            "id": "app-two",
+            "project": job["project"],
+            "hash": hashlib.sha256(b"second-mock-app-token").hexdigest(),
+            "revoked": 0,
+        },
+    ]
+    assert client.put("/v2/app-grants", headers=owner, json=grants).status_code == 200
+    monkeypatch.setattr(
+        client.app.state.external,
+        "recover",
+        lambda *_: (_ for _ in ()).throw(AssertionError("read must not recover")),
+    )
+    path = "/v2/external/requests/" + request()["request_id"]
+    assert client.get(path, headers={"Authorization": "Bearer second-mock-app-token"}).json() == {
+        "found": False,
+        "request_id": request()["request_id"],
+    }
+    status = client.get(path, headers=auth)
+    assert status.status_code == 200 and status.json()["id"] == job["id"]
+    assert status.json()["registered_task"]["instructions"] == job["instructions"]
+    assert len(client.app.state.tasks.list()["tasks"]) == 1
+    assert client.app.state.tasks.get(job["id"])["attempts"] == []
+    assert client.get("/v2/external/requests/bad%20request", headers=auth).status_code == 422
+    assert client.get(path).status_code == 401
